@@ -18,8 +18,8 @@ score_types = {
     #    # "pro_close": pyrosetta.rosetta.core.scoring.ScoreType.pro_close,
     "hbond_sr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sr_bb,
     "hbond_lr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_lr_bb,
-    "hbond_bb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_bb_sc,
-    "hbond_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sc,
+    # "hbond_bb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_bb_sc,
+    # "hb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sc,
     #    # "dslf_fa13": pyrosetta.rosetta.core.scoring.ScoreType.dslf_fa13,
     #    # "rama_prepro": pyrosetta.rosetta.core.scoring.ScoreType.rama_prepro,
     #    # "omega": pyrosetta.rosetta.core.scoring.ScoreType.omega,
@@ -40,78 +40,64 @@ def pdbdata(pose, fname):
     sf.set_energy_method_options(sfopt)
     sf(pose)
 
-    # one-body stuff
+    # coords, etc
 
     ncac = get_bb_coords(pose)
-    stubs = ncac_to_stubs(ncac)
-
-    cb = get_cb_coords(pose)
+    stubs = ncac_to_stubs(ncac).astype("f4")
+    ncac = ncac.astype("f4")
+    cb = get_cb_coords(pose).astype("f4")
     com = np.mean(cb, axis=0)
     rg = np.sqrt(np.sum((cb - com) ** 2) / len(cb))
     coords = dict(ncac=ncac, cb=cb, stubs=stubs, com=com, rg=rg)
     chains = get_chain_bounds(pose)
 
-    seq = pose.sequence()
-    ss = pyrosetta.rosetta.core.scoring.dssp.Dssp(pose).get_dssp_secstruct()
-    phi = np.array([pose.phi(i) for i in range(1, len(pose) + 1)])
-    psi = np.array([pose.psi(i) for i in range(1, len(pose) + 1)])
-    omega = np.array([pose.omega(i) for i in range(1, len(pose) + 1)])
-    resdata = dict(seq=seq, ss=ss, phi=phi, psi=psi, omega=omega)
+    # one-body stuff
 
-    sasa_probe_vals = np.array([2, 3, 4])
+    resdata = dict(
+        phi=[pose.phi(i) for i in range(1, len(pose) + 1)],
+        psi=[pose.psi(i) for i in range(1, len(pose) + 1)],
+        omega=[pose.omega(i) for i in range(1, len(pose) + 1)],
+        chi1=[get_pose_chi(pose, i, 1) for i in range(1, len(pose) + 1)],
+        chi2=[get_pose_chi(pose, i, 2) for i in range(1, len(pose) + 1)],
+        chi3=[get_pose_chi(pose, i, 3) for i in range(1, len(pose) + 1)],
+        chi4=[get_pose_chi(pose, i, 4) for i in range(1, len(pose) + 1)],
+    )
+    resdata = {k: np.array(v, "f4") for k, v in resdata.items()}
+    for v in resdata.values():
+        assert len(v) == len(pose)
+    resdata["seq"] = pose.sequence()
+    resdata["ss"] = pyrosetta.rosetta.core.scoring.dssp.Dssp(pose).get_dssp_secstruct()
+    resdata["chain"] = [pose.chain(i) - 1 for i in range(1, len(pose) + 1)]
+
     # print(fname, "compute sasa")
+    sasa_probe_vals = np.array([2, 3, 4])
     sasa = polya_sasa(pose, sasa_probe_vals)
     assert len(pose) == sasa.shape[0]
     assert sasa.shape[1] == len(sasa_probe_vals)
     for i, v in enumerate(sasa_probe_vals):
         resdata["sasa" + str(v)] = sasa[:, i]
 
-    assert len(pose) == len(ncac)
-    assert len(pose) == len(cb)
-    assert len(pose) == len(stubs)
-    assert len(pose) == len(ss)
-    assert len(pose) == len(seq)
-    assert len(pose) == len(phi)
-    assert len(pose) == len(psi)
-    assert len(pose) == len(omega)
-
-    if ncac.shape[-1] is 4:
-        ncac = ncac.astype(np.float64)
-    elif ncac.shape[-1] is 3:
-        tmp = np.ones((ncac.shape[0], 3, 4), dtype=np.float64)
-        tmp[..., :3] = ncac
-        ncac = tmp
-    else:
-        assert 0, "bad ncac"
-
     # two-body stuff
-    chainseqs = [seq[lb:ub] for lb, ub in chains]
+    chainseqs = [resdata["seq"][lb:ub] for lb, ub in chains]
     sym_chain_follows = [chainseqs.index(x) for x in chainseqs]
 
     pairdata = extract_pair_terms(**vars())
-    # print(fname, "npairterms", pairdata["dist"].shape, len(pose))
-
-    hbonds = extract_hbond_terms(**vars())
-
-    # print("coords", coords.keys())
-    # print("resdata", resdata.keys())
-    # print("pairdata", pairdata.keys())
-    # print("hbonds", hbonds.keys())
 
     return dict(
-        fname=fname,
-        coords=coords,
-        chains=chains,
-        resdata=resdata,
-        pairdata=pairdata,
-        hbonds=hbonds,
+        fname=fname, coords=coords, chains=chains, resdata=resdata, pairdata=pairdata
     )
+
+
+def get_pose_chi(pose, ir, ichi):
+    if ichi <= pose.residue(ir).nchi():
+        return pose.chi(ichi, ir)
+    return -12345.0
 
 
 def extract_hbond_terms(pose, fname, **kw):
     hbset = pyrosetta.rosetta.core.scoring.hbonds.HBondSet()
     pyrosetta.rosetta.core.scoring.hbonds.fill_hbond_set(pose, False, hbset)
-    result = [set(), set(), set(), set()]
+    result = [dict(), dict(), dict(), dict()]
     for ihb in range(hbset.nhbonds()):
         hbond = hbset.hbond(ihb + 1)
         ir = hbond.don_res()
@@ -120,21 +106,28 @@ def extract_hbond_terms(pose, fname, **kw):
         jrbb = hbond.acc_atm_is_protein_backbone()
         if jr < ir:
             ir, irbb, jr, bb = jr, jrbb, ir, irbb
+        assert ir < jr
         idx = 2 * irbb + jrbb
-        result[idx].add((ir, jr, hbond.energy()))
+        if (ir, jr) not in result[idx]:
+            result[idx][ir, jr] = 0.0
+        result[idx][ir, jr] += hbond.energy()
+
         # cute indexing sanity check...
         # print(irbb, jrbb, ["sc_sc", "sc_bb", "bb_sc", "bb_bb"][idx])
     # result = [np.array(list(x)) for x in result]
-    labels = ["sc_sc", "sc_bb", "bb_sc", "bb_bb"]
+    labels = ["hb_sc_sc", "hb_sc_bb", "hb_bb_sc", "hb_bb_bb"]
     return {k: v for k, v in zip(labels, result)}
 
 
 def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
     eweights = pose.energies().weights()
     energy_graph = pose.energies().energy_graph()
+    hbonds = extract_hbond_terms(pose, fname)
 
     # print(fname, "extract pair energies")
-    lbls = ["dist", "etot", "resi", "resj"] + list(score_types.keys())
+    lbls = ["dist", "etot", "resi", "resj"]
+    hb_lbls = ["hb_bb_bb", "hb_bb_sc", "hb_sc_bb", "hb_sc_sc"]
+    lbls += hb_lbls + list(score_types.keys())
     pairterms = {k: list() for k in lbls}
     for ichain, chain in enumerate(chains):
         if ichain != sym_chain_follows[ichain]:
@@ -143,6 +136,7 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
         for ir in range(*chain):
             assert pose.residue(ir + 1).is_protein()
             for jr in range(ir + 1, len(pose)):
+                assert ir < jr
                 edge = energy_graph.find_edge(ir + 1, jr + 1)
                 if not edge:
                     continue
@@ -153,10 +147,15 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
                 pairterms["resj"].append(jr)
                 pairterms["dist"].append(np.sqrt(edge.square_distance()))
                 pairterms["etot"].append(etot)
+                for lbl in hb_lbls:
+                    h = hbonds[lbl][(ir, jr)] if (ir, jr) in hbonds[lbl] else 0
+                    pairterms[lbl].append(h)
                 for lbl, st in score_types.items():
                     pairterms[lbl].append(edge[st])
     for k in pairterms.keys():
-        pairterms[k] = np.array(pairterms[k], np.float32)
+        pairterms[k] = np.array(pairterms[k], "f4")
+    for v in pairterms.values():
+        assert len(v) == len(pairterms["dist"])
     return pairterms
 
 
@@ -167,7 +166,7 @@ def polya_sasa(pose, sasa_probe_vals):
     m.apply(polya_pose)
     sasacalc = pyrosetta.rosetta.core.scoring.sasa.SasaCalc()
 
-    rsdsasa = np.zeros((len(pose), len(sasa_probe_vals)))
+    rsdsasa = np.zeros((len(pose), len(sasa_probe_vals)), dtype='f4')
     for i, r in enumerate(sasa_probe_vals):
         sasacalc.set_probe_radius(r)
         sasacalc.calculate(polya_pose)

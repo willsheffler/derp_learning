@@ -1,107 +1,36 @@
 import sys
 import os
-import glob
 import _pickle
 import concurrent.futures
 import threading
 import random
-import multiprocessing
 import argparse
 
 import tqdm
 import pyrosetta
 
 from derp_learning.pdbdata import pdbdata
+from derp_learning.util import InProcessExecutor, fnames_from_arg_list, cpu_count
 
 pyrosetta.init("-beta_nov16 -mute all")
 
 
-def cpu_count():
-    try:
-        return int(os.environ["SLURM_CPUS_ON_NODE"])
-    except:
-        return multiprocessing.cpu_count()
-
-
-class InProcessExecutor:
-    def __init__(self, *args, **kw):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
-
-    def submit(self, fn, *args, **kw):
-        return NonFuture(fn, *args, **kw)
-
-    # def map(self, func, *iterables):
-    # return map(func, *iterables)
-    # return (NonFuture(func(*args) for args in zip(iterables)))
-
-
-class NonFuture:
-    def __init__(self, fn, *args, dummy=None, **kw):
-        self.fn = fn
-        self.dummy = not callable(fn) if dummy is None else dummy
-        self.args = args
-        self.kw = kw
-        self._condition = threading.Condition()
-        self._state = "FINISHED"
-        self._waiters = []
-
-    def result(self):
-        if self.dummy:
-            return self.fn
-        return self.fn(*self.args, **self.kw)
-
-
-def pdbs_from_file(fname):
-    # print("pdbs_from_file", fname)
-    if fname.endswith((".pdb", ".pdb.gz")):
-        return [fname]
-    else:
-        print("ERROR don't know now to handle file", fname)
-        return []
-
-
-def pdbs_from_glob(pattern):
-    # print("pdbs_from_glob", pattern)
-    pdbs = list()
-    for path in glob.glob(pattern):
-        if os.path.isdir(path):
-            pdbs += pdbs_from_directory(path)
-        else:
-            pdbs += pdbs_from_file(path)
-    return pdbs
-
-
-def pdbs_from_directory(path):
-    # print("pdbs_from_directory", path)
-    pdbs = list()
-    pdbs += pdbs_from_glob(path + "/*.pdb")
-    pdbs += pdbs_from_glob(path + "/*.pdb.gz")
-    return pdbs
-
-
-def pdbs_from_arg_list(args):
-    # print("pdbs_from_arg_list", args)
-    pdbs = list()
-    for arg in args:
-        if os.path.isdir(arg):
-            pdbs += pdbs_from_directory(arg)
-        elif arg.count("*") or arg.count("?"):
-            pdbs += pdbs_from_glob(arg)
-        else:
-            pdbs += pdbs_from_file(arg)
-    return pdbs
-
+def output_fname(fname, storage_dir):
+    outfile = fname.lstrip("/") + ".pickle"
+    outfile = os.path.join(storage_dir, outfile)
+    posefile = outfile[:-7] + '.pose_pickle'
+    return outfile, posefile
 
 def process_pdb(fname, storage_dir="."):
+    outfile, posefile = output_fname(fname, storage_dir)
+
+
     try:
-        # print(fname, "read pose")
-        pose = pyrosetta.pose_from_file(fname)
+        if os.path.exists(posefile):
+            with open(posefile, 'rb') as inp:
+                pose = _pickle.load(inp)
+        else:
+            pose = pyrosetta.pose_from_file(fname)
     except:
         # print("ERROR pyrosetta can't read", fname)
         return fname
@@ -113,11 +42,13 @@ def process_pdb(fname, storage_dir="."):
         print("   ", e)
         return fname
 
-    outfile = fname.lstrip("/") + ".pickle"
-    outfile = os.path.join(storage_dir, outfile)
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     with open(outfile, "wb") as out:
         _pickle.dump(dat, out)
+    if not os.path.exists(posefile):
+        with open(posefile, 'wb') as out:
+            _pickle.dump(pose, out)
+
 
 
 def process_parallel(pdbs, max_workers):
@@ -139,6 +70,7 @@ def process_parallel(pdbs, max_workers):
             err = f.result()
             if err is not None:
                 errors.append(err)
+    return errors
 
 
 def main():
@@ -148,7 +80,7 @@ def main():
     parser.add_argument("pdbs", nargs="*")
     args = parser.parse_args(sys.argv[1:])
 
-    pdbs = pdbs_from_arg_list(args.pdbs)
+    pdbs = fnames_from_arg_list(args.pdbs, [".pdb", ".pdb.gz"])
     random.shuffle(pdbs)
     print("pdbs", len(pdbs))
     errors = process_parallel(pdbs, max_workers=args.parallel)
