@@ -18,19 +18,19 @@ pyrosetta.init("-beta_nov16 -mute all")
 def output_fname(fname, storage_dir):
     outfile = fname.lstrip("/") + ".pickle"
     outfile = os.path.join(storage_dir, outfile)
-    posefile = outfile[:-7] + '.pose_pickle'
+    posefile = outfile[:-7] + ".pose_pickle"
     return outfile, posefile
+
 
 def process_pdb(fname, storage_dir="."):
     outfile, posefile = output_fname(fname, storage_dir)
 
-
     try:
-        if os.path.exists(posefile):
-            with open(posefile, 'rb') as inp:
-                pose = _pickle.load(inp)
-        else:
-            pose = pyrosetta.pose_from_file(fname)
+        # if os.path.exists(posefile):
+        # with open(posefile, 'rb') as inp:
+        # pose = _pickle.load(inp)
+        # else:
+        pose = pyrosetta.pose_from_file(fname)
     except:
         # print("ERROR pyrosetta can't read", fname)
         return fname
@@ -46,9 +46,8 @@ def process_pdb(fname, storage_dir="."):
     with open(outfile, "wb") as out:
         _pickle.dump(dat, out)
     if not os.path.exists(posefile):
-        with open(posefile, 'wb') as out:
+        with open(posefile, "wb") as out:
             _pickle.dump(pose, out)
-
 
 
 def process_parallel(pdbs, max_workers):
