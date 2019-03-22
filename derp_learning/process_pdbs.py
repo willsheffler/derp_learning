@@ -5,6 +5,8 @@ import _pickle
 import concurrent.futures
 import threading
 import random
+import multiprocessing
+import argparse
 
 import tqdm
 import pyrosetta
@@ -12,6 +14,13 @@ import pyrosetta
 from derp_learning.pdbdata import pdbdata
 
 pyrosetta.init("-beta_nov16 -mute all")
+
+
+def cpu_count():
+    try:
+        return int(os.environ["SLURM_CPUS_ON_NODE"])
+    except:
+        return multiprocessing.cpu_count()
 
 
 class InProcessExecutor:
@@ -82,7 +91,7 @@ def pdbs_from_arg_list(args):
     for arg in args:
         if os.path.isdir(arg):
             pdbs += pdbs_from_directory(arg)
-        elif arg.count("*"):
+        elif arg.count("*") or arg.count("?"):
             pdbs += pdbs_from_glob(arg)
         else:
             pdbs += pdbs_from_file(arg)
@@ -112,8 +121,13 @@ def process_pdb(fname, storage_dir="."):
 
 
 def process_parallel(pdbs, max_workers):
-    exe = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
-    # exe = InProcessExecutor()
+    if max_workers < 0:
+        max_workers = cpu_count()
+    if max_workers == 0:
+        exe = InProcessExecutor()
+    else:
+        exe = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+
     errors = list()
     with exe as pool:
         futures = list()
@@ -128,10 +142,16 @@ def process_parallel(pdbs, max_workers):
 
 
 def main():
-    pdbs = pdbs_from_arg_list(a for a in sys.argv[1:] if a[0] != "-")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--parallel", default=-1, type=int)
+    parser.add_argument("pdbs", nargs="*")
+    args = parser.parse_args(sys.argv[1:])
+
+    pdbs = pdbs_from_arg_list(args.pdbs)
     random.shuffle(pdbs)
     print("pdbs", len(pdbs))
-    errors = process_parallel(pdbs, max_workers=8)
+    errors = process_parallel(pdbs, max_workers=args.parallel)
     if errors:
         print("pdb files not processed:")
         for e in errors:
