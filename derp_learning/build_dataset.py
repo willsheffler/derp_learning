@@ -2,7 +2,6 @@ import sys
 import random
 import _pickle
 import argparse
-import xarray as xr
 from time import clock
 
 import numpy as np
@@ -16,7 +15,7 @@ def load(fname):
         return _pickle.load(f)
 
 
-def build_dataset_from_files(fnames):
+def concatenate_pdb_data(fnames):
     if len(fnames) == 0:
         print("no files specified")
         sys.exit()
@@ -29,11 +28,13 @@ def build_dataset_from_files(fnames):
     com = np.stack([x["coords"]["com"] for x in raw])
     rg = np.array([x["coords"]["rg"] for x in raw])
     nres = np.array([len(x["coords"]["cb"]) for x in raw])
+    pdbdata = dict(pdb=pdb, nres=nres, chains=chains, com=com, rg=rg)
 
     # per res
     ncac = np.concatenate([x["coords"]["ncac"] for x in raw])
     cb = np.concatenate([x["coords"]["cb"] for x in raw])
     stubs = np.concatenate([x["coords"]["stubs"] for x in raw])
+    coords = dict(ncac=ncac, cb=cb, stubs=stubs)
 
     resdata = dict()
     resdata["pdbno"] = [np.repeat(i, len(x["coords"]["cb"])) for i, x in enumerate(raw)]
@@ -46,7 +47,6 @@ def build_dataset_from_files(fnames):
         else:
             dat = np.concatenate([x["resdata"][name] for x in raw])
         resdata[name] = dat
-    resdata = xr.Dataset(resdata)
 
     pdb_res_offsets = np.cumsum([len(x["resdata"]["phi"]) for x in raw])
     pdb_res_offsets[1:] = pdb_res_offsets[:-1]
@@ -64,6 +64,7 @@ def build_dataset_from_files(fnames):
     pdb_pair_offsets[0] = 0
     tmp = [np.repeat(i, len(x["pairdata"]["dist"])) for i, x in enumerate(raw)]
     pairdata["pdbno"] = np.concatenate(tmp).astype("i4")
+
     sanity_check_pair_data(**vars())
 
     tot_nres = len(resdata["phi"])
@@ -84,6 +85,8 @@ def build_dataset_from_files(fnames):
     dhat = np.linalg.norm(cbi - cbj, axis=1)
     assert np.allclose(dhat, pairdata["dist"], atol=1e-3)
 
+    return dict(pdbdata=pdbdata, coords=coords, resdata=resdata, pairdata=pairdata)
+
     cart_resl = [0.5, 1.0, 2.0]
     ori_resl = [7.5, 15, 30]
     hash_params = [(c, o) for c in cart_resl for o in ori_resl]
@@ -100,8 +103,6 @@ def build_dataset_from_files(fnames):
     print("binning time", clock() - t)
 
     # neighbors within radii???
-
-    return
 
 
 # (XA)inv * (XB)
@@ -146,7 +147,9 @@ def main():
     parser.add_argument("pdbs", nargs="*")
     args = parser.parse_args(sys.argv[1:])
     fnames = fnames_from_arg_list(args.pdbs, [".pickle"])
-    build_dataset_from_files(fnames)
+    dat = concatenate_pdb_data(fnames)
+    with open("combined_data.pickle", "wb") as out:
+        _pickle.dump(dat, out)
 
 
 if __name__ == "__main__":
