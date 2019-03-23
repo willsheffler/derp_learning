@@ -4,6 +4,7 @@ import _pickle
 import argparse
 from time import clock
 
+from tqdm import tqdm
 import numpy as np
 
 import xbin
@@ -16,15 +17,14 @@ def load(fname):
 
 
 def concatenate_pdb_data(fnames):
+    print(f"concatenate_pdb_data for {len(fnames):,} files")
     if len(fnames) == 0:
         print("no files specified")
         sys.exit()
 
     print("reading data files")
     raw = list()
-    for i, fname in enumerate(fnames):
-        if (i + 1) % 1000 == 0:
-            print(f"load {i+1:,} of {len(fnames):,}")
+    for fname in tqdm(fnames):
         raw.append(load(fname))
 
     print("make per-structure data")
@@ -56,27 +56,29 @@ def concatenate_pdb_data(fnames):
     pdb_res_offsets = np.cumsum([len(x["resdata"]["phi"]) for x in raw])
     pdb_res_offsets[1:] = pdb_res_offsets[:-1]
     pdb_res_offsets[0] = 0
+    print("    sanity check res data")
     sanity_check_res_data(**vars())
 
-    print("make residue pair data data")
+    print("make residue pair data")
     pairdata = dict()
     for name in raw[0]["pairdata"]:
+        print("    make pair data", name)
         pairdata[name] = np.concatenate([x["pairdata"][name] for x in raw])
     pairdata["resi"] = pairdata["resi"].astype("i4")
     pairdata["resj"] = pairdata["resj"].astype("i4")
 
+    print("    make pair data pdb_pair_offsets & pdbno")
     pdb_pair_offsets = np.cumsum([len(x["pairdata"]["dist"]) for x in raw])
     pdb_pair_offsets[1:] = pdb_pair_offsets[:-1]
     pdb_pair_offsets[0] = 0
     tmp = [np.repeat(i, len(x["pairdata"]["dist"])) for i, x in enumerate(raw)]
     pairdata["pdbno"] = np.concatenate(tmp).astype("i4")
 
-    print("sanity check pair data")
+    print("    sanity check pair data")
     sanity_check_pair_data(**vars())
 
     tot_nres = len(resdata["phi"])
     tot_pairs = len(pairdata["dist"])
-    print(f"nstruct {len(pdb):,} nres {tot_nres:,} npairs {tot_pairs:,}")
 
     print("sanity check pair distances vs res-res distances")
     pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resi"]
@@ -87,6 +89,7 @@ def concatenate_pdb_data(fnames):
     dhat = np.linalg.norm(cbi - cbj, axis=1)
     assert np.allclose(dhat, pairdata["dist"], atol=1e-3)
 
+    print(f"returning: nstruct {len(pdb):,} nres {tot_nres:,} npairs {tot_pairs:,}")
     return dict(pdbdata=pdbdata, coords=coords, resdata=resdata, pairdata=pairdata)
 
     pair_stubi = stubs[pair_resi_idx]
@@ -132,7 +135,7 @@ def sanity_check_res_data(nres, pdb_res_offsets, resdata, **kw):
 
 
 def sanity_check_pair_data(nres, pdb_pair_offsets, pairdata, **kw):
-    for i, o in enumerate(pdb_pair_offsets):
+    for i, o in enumerate(tqdm(pdb_pair_offsets)):
         pdbi = pairdata["pdbno"] == i
         for tmp in ("resi", "resj"):
             residx = pairdata[tmp][pdbi]
