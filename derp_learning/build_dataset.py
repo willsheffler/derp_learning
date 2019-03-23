@@ -20,9 +20,14 @@ def concatenate_pdb_data(fnames):
         print("no files specified")
         sys.exit()
 
-    raw = [load(fname) for fname in fnames]
+    print("reading data files")
+    raw = list()
+    for i, fname in enumerate(fnames):
+        if (i + 1) % 1000 == 0:
+            print(f"load {i+1:,} of {len(fnames):,}")
+        raw.append(load(fname))
 
-    # per structure
+    print("make per-structure data")
     pdb = [x["fname"] for x in raw]
     chains = [x["chains"] for x in raw]
     com = np.stack([x["coords"]["com"] for x in raw])
@@ -30,7 +35,7 @@ def concatenate_pdb_data(fnames):
     nres = np.array([len(x["coords"]["cb"]) for x in raw])
     pdbdata = dict(pdb=pdb, nres=nres, chains=chains, com=com, rg=rg)
 
-    # per res
+    print("make per-residue data")
     ncac = np.concatenate([x["coords"]["ncac"] for x in raw])
     cb = np.concatenate([x["coords"]["cb"] for x in raw])
     stubs = np.concatenate([x["coords"]["stubs"] for x in raw])
@@ -53,6 +58,7 @@ def concatenate_pdb_data(fnames):
     pdb_res_offsets[0] = 0
     sanity_check_res_data(**vars())
 
+    print("make residue pair data data")
     pairdata = dict()
     for name in raw[0]["pairdata"]:
         pairdata[name] = np.concatenate([x["pairdata"][name] for x in raw])
@@ -65,20 +71,16 @@ def concatenate_pdb_data(fnames):
     tmp = [np.repeat(i, len(x["pairdata"]["dist"])) for i, x in enumerate(raw)]
     pairdata["pdbno"] = np.concatenate(tmp).astype("i4")
 
+    print("sanity check pair data")
     sanity_check_pair_data(**vars())
 
     tot_nres = len(resdata["phi"])
     tot_pairs = len(pairdata["dist"])
     print(f"nstruct {len(pdb):,} nres {tot_nres:,} npairs {tot_pairs:,}")
 
+    print("sanity check pair distances vs res-res distances")
     pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resi"]
     pair_resj_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resj"]
-
-    pair_stubi = stubs[pair_resi_idx]
-    pair_stubj = stubs[pair_resj_idx]
-    xreli = np.linalg.inv(pair_stubi) @ pair_stubj
-    xrelj = np.linalg.inv(pair_stubj) @ pair_stubi
-    assert np.allclose(np.linalg.inv(xreli), xrelj, atol=1e-3)  # floats kinda suck...
 
     cbi = cb[pair_resi_idx]
     cbj = cb[pair_resj_idx]
@@ -86,6 +88,12 @@ def concatenate_pdb_data(fnames):
     assert np.allclose(dhat, pairdata["dist"], atol=1e-3)
 
     return dict(pdbdata=pdbdata, coords=coords, resdata=resdata, pairdata=pairdata)
+
+    pair_stubi = stubs[pair_resi_idx]
+    pair_stubj = stubs[pair_resj_idx]
+    xreli = np.linalg.inv(pair_stubi) @ pair_stubj
+    xrelj = np.linalg.inv(pair_stubj) @ pair_stubi
+    assert np.allclose(np.linalg.inv(xreli), xrelj, atol=1e-3)  # floats kinda suck...
 
     cart_resl = [0.5, 1.0, 2.0]
     ori_resl = [7.5, 15, 30]
