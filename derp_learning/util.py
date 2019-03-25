@@ -1,12 +1,24 @@
 import os
 import glob
 import multiprocessing
+import concurrent.futures
+
 
 def cpu_count():
     try:
         return int(os.environ["SLURM_CPUS_ON_NODE"])
     except:
         return multiprocessing.cpu_count()
+
+
+def get_process_executor(max_workers):
+    if max_workers < 0:
+        max_workers = cpu_count()
+    if max_workers == 0:
+        exe = InProcessExecutor()
+    else:
+        exe = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+    return exe
 
 
 class InProcessExecutor:
@@ -80,4 +92,3 @@ def fnames_from_arg_list(args, exts):
         else:
             fnames += pdbs_from_file(arg, exts)
     return fnames
-
