@@ -263,15 +263,23 @@ def main():
     fnames = fnames_from_arg_list(args.pdbs, [".pickle"])
     fnames = [f for f in fnames if f not in _bad_pickles]
 
-    if os.path.exists("__HACK_TMP_FILE.pickle"):
-        print("reading hacky tmp file")
-        with open("__HACK_TMP_FILE.pickle", "rb") as inp:
-            dat = _pickle.load(inp)
-    else:
+    # if os.path.exists("__HACK_TMP_FILE.pickle"):
+    # print("reading hacky tmp file")
+    # with open("__HACK_TMP_FILE.pickle", "rb") as inp:
+    # t = clock()
+    # print("loading hack tmp pickle")
+    # dat = _pickle.load(inp)
+    # print("loading hack tmp pickle done", clock() - t)
+    # else:
 
-        dat = process_pdb_data(fnames, args.parallel)
+    dat = process_pdb_data(fnames, args.parallel)
 
-        compute_pair_xform_bins(dat, args.parallel)
+    compute_pair_xform_bins(dat, args.parallel)
+
+    #
+    # with open("__HACK_TMP_FILE.pickle", "wb") as out:
+    # _pickle.dump(dat, out)
+    #
 
     print("summary of raw data")
     print_summary(dat)

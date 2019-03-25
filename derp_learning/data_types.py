@@ -63,6 +63,8 @@ class ResPairData:
         assert np.all(self.data.bb.sel(ncac="ca", xyzw="w") == 1)
 
     def __getattr__(self, k):
+        if k == "data":
+            raise AttributeError
         return getattr(self.data, k)
 
     def __str__(self):
