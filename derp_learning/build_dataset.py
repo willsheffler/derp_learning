@@ -11,6 +11,7 @@ import numpy as np
 import xarray as xr
 
 import xbin
+from derp_learning.data_types import ResPairData
 from derp_learning.util import (
     InProcessExecutor,
     fnames_from_arg_list,
@@ -101,7 +102,9 @@ def process_pdb_data(fnames, parallel):
 
 def _compute_nnb(res_cb, nbdists):
     nnb = list()
-    dist = np.linalg.norm(res_cb[None, :] - res_cb[:, None], axis=2)
+    # 0.000001 hack to avoid some stupid sqrt err in np.linalg.norm
+    diff = np.abs(res_cb[None, :] - res_cb[:, None]) + 0.000_001
+    dist = np.linalg.norm(diff, axis=2)
     for nbdist in nbdists:
         lbl = "nnb" + str(nbdist)
         nnb.append(np.sum(dist <= nbdist, axis=1) - 1)
@@ -217,29 +220,27 @@ def compute_pair_xform_bins(dat, parallel=-1):
     return
 
 
-def convert_to_xarray(dat):
-    pass
-
-
 def print_summary(dat):
-    print("pdbdata")
+    print("  pdbdata")
     npdb = len(dat["pdbdata"]["nres"])
     nres = np.sum(dat["pdbdata"]["nres"])
     npair = len(dat["pairdata"]["dist"])
     for k, v in dat["pdbdata"].items():
-        print("   ", k, f"{len(v):,}")
+        print("   ", k, f"{v.shape if hasattr(v, 'shape') else len(v)}")
         assert len(v) == npdb
-    print("coords")
+    print("  coords")
     for k, v in dat["coords"].items():
-        print("   ", k, f"{len(v):,}")
+        print("   ", k, f"{v.shape if hasattr(v, 'shape') else len(v)}")
         assert len(v) == nres
-    print("resdata")
+    print("  resdata")
+    print("    offsets", dat["pdb_res_offsets"].shape)
     for k, v in dat["resdata"].items():
-        print("   ", k, f"{len(v):,}")
+        print("   ", k, f"{v.shape if hasattr(v, 'shape') else len(v)}")
         assert len(v) == nres
-    print("pairdata")
+    print("  pairdata")
+    print("    offsets", dat["pdb_pair_offsets"].shape)
     for k, v in dat["pairdata"].items():
-        print("   ", k, f"{len(v):,}")
+        print("   ", k, f"{v.shape if hasattr(v, 'shape') else len(v)}")
         assert len(v) == npair
 
 
@@ -254,7 +255,7 @@ def main():
     )
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--outfile", default="res_pair_data.pickle")
+    parser.add_argument("--outfile", default="pdb_res_pair_data.pickle")
     parser.add_argument("--parallel", default=-1, type=int)
     parser.add_argument("pdbs", nargs="*")
     args = parser.parse_args(sys.argv[1:])
@@ -266,19 +267,20 @@ def main():
         print("reading hacky tmp file")
         with open("__HACK_TMP_FILE.pickle", "rb") as inp:
             dat = _pickle.load(inp)
-            print(dat)
     else:
 
         dat = process_pdb_data(fnames, args.parallel)
 
         compute_pair_xform_bins(dat, args.parallel)
 
+    print("summary of raw data")
     print_summary(dat)
 
+    rp = ResPairData(**dat)
+    print(rp)
+    del dat
     with open(args.outfile, "wb") as out:
-        _pickle.dump(dat, out)
-
-    ds = convert_to_xarray(dat)
+        _pickle.dump(rp, out)
 
 
 if __name__ == "__main__":
