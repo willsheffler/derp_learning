@@ -70,6 +70,9 @@ class ResPairData:
     def __str__(self):
         return "ResPairData with data = " + str(self.data).replace("\n", "\n  ")
 
+    def drop_nonmatching_pdbids(self):
+        pass
+
 
 def _get_pdb_names(files):
     base = [os.path.basename(f) for f in files]
