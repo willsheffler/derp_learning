@@ -5,11 +5,16 @@ import numpy as np
 
 
 class ResPairData:
-    def __init__(self, raw=None, data=None):
+    def __init__(self, data):
 
-        if data is not None:
+        if isinstance(data, xr.Dataset):
             self.data = data
             return
+        elif isinstance(data, ResPairData):
+            self.data = data.data
+            return
+
+        assert isinstance(data, dict)
 
         pdbdata = raw["pdbdata"]
         coords = raw["coords"]
@@ -70,10 +75,15 @@ class ResPairData:
             raise AttributeError
         return getattr(self.data, k)
 
+    def __getitem__(self, k):
+        return self.data[k]
+
     def __str__(self):
         return "ResPairData with data = " + str(self.data).replace("\n", "\n  ")
 
     def subset(self, keep=None):
+        if isinstance(keep, (int, np.int32, np.int64)):
+            keep = sorted(np.random.choice(len(self.pdb), keep, replace=False))
         rp = self.data
         pdbs = rp.pdb[keep].values
         mask = np.isin(rp.pdb, pdbs)
@@ -84,15 +94,15 @@ class ResPairData:
         rpsub = rp.sel(pdbid=keep, resid=residx, pairid=pairidx)
         rpsub.pdbidr.values = old2new[rpsub.pdbidr]
         rpsub.pdbidp.values = old2new[rpsub.pdbidp]
-        rpsub["pdb_res_offsets"] = np.concatenate([[0], np.cumsum(rpsub.nres)])
+        rpsub.attrs["pdb_res_offsets"] = np.concatenate([[0], np.cumsum(rpsub.nres)])
         tmp = np.cumsum(rpsub.pdbidp.groupby(rpsub.pdbidp).count())
-        rpsub["pdb_pair_offsets"] = np.concatenate([[0], tmp])
-        return ResPairData(data=rpsub)
+        rpsub.attrs["pdb_pair_offsets"] = np.concatenate([[0], tmp])
+        return ResPairData(rpsub)
 
     def sanity_check(self):
         rp = self.data
-        for ipdb in range(len(rp.pdb)):
-            rlb, rub = rp.pdb_res_offsets.values[ipdb : ipdb + 2]
+        for ipdb in np.random.choice(len(self.pdb), 10, replace=False):
+            rlb, rub = rp.pdb_res_offsets[ipdb : ipdb + 2]
             if rlb > 0:
                 assert rp.pdbidr[rlb - 1] == ipdb - 1
             assert rp.pdbidr[rlb] == ipdb
@@ -102,7 +112,7 @@ class ResPairData:
             resi = rp.resno[rp.pdbidr == ipdb]
             assert np.min(resi) == 0
             assert np.max(resi) == rp.nres[ipdb] - 1
-            plb, pub = rp.pdb_pair_offsets.values[ipdb : ipdb + 2]
+            plb, pub = rp.pdb_pair_offsets[ipdb : ipdb + 2]
             resi = rp.resi[plb:pub]
             resj = rp.resj[plb:pub]
             assert np.min(resi) == 0
