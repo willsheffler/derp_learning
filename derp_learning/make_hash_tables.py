@@ -22,6 +22,32 @@ if "ppdbidp" in respairdat.data:
     print("renaming ppdbidp")
     respairdat.data.rename(inplace=True, ppdbidp="pdbidp")
 
+
+if "seq" in respairdat.data:
+    id2aa = np.array(list("ACDEFGHIKLMNPQRSTVWY"))
+    aa2id = xr.DataArray(np.arange(20, dtype="i4"), [("aa", id2aa)])
+    aaid = aa2id.sel(aa=respairdat.seq).values.astype("i4")
+    respairdat.data["aaid"] = xr.DataArray(aaid, dims=["resid"])
+    respairdat.data = respairdat.data.drop("seq")
+    respairdat.data["id2aa"] = xr.DataArray(id2aa, [aa2id], ["aai"])
+    respairdat.data["aa2id"] = xr.DataArray(aa2id, [id2aa], ["aa"])
+
+    id2ss = np.array(list("EHL"))
+    ss2id = xr.DataArray(np.arange(3, dtype="i4"), [("ss", id2ss)])
+    ssid = ss2id.sel(ss=respairdat.ss).values.astype("i4")
+    respairdat.data["ssid"] = xr.DataArray(ssid, dims=["resid"])
+    respairdat.data = respairdat.data.drop("ss")
+    respairdat.data["id2ss"] = xr.DataArray(id2ss, [ss2id], ["ssi"])
+    respairdat.data["ss2id"] = xr.DataArray(ss2id, [id2ss], ["ss"])
+
+print(respairdat)
+
+
+import sys
+
+sys.exit()
+
+
 nb.njit(nogil=True, fastmath=True)
 
 
@@ -49,7 +75,8 @@ def main():
     print("sanity_check")
     rp.sanity_check()
 
-    bins = rp.data["xijbin_2.0_30"].values
+    bintype = "xijbin_2.0_30"
+    bins = rp.data[bintype].values
     print("argsort bin")
     order = np.argsort(bins)
     sbins = bins[order]
@@ -69,8 +96,9 @@ def main():
 
     for i in np.random.choice(len(bins), 10):
         lb, ub = binner.sel(binidx=bins[i]).values
-        print(i, lb, ub)
-        assert np.all(rp.data["xijbin_2.0_30"][order[lb:ub]] == bins[i])
+        assert np.all(rp.data[bintype][order[lb:ub]] == bins[i])
+
+    binsp = xr.DataArray(np.zeros(len(vals), 20))
 
 
 if __name__ == "__main__":
