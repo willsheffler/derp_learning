@@ -2,6 +2,9 @@ import os
 import _pickle
 import random
 import numpy as np
+import xarray as xr
+
+from derp_learning.data_types import ResPairData
 
 
 def load_which_takes_forever():
@@ -15,13 +18,16 @@ else:
     rp = load_which_takes_forever()
     os.a_very_unique_name = rp
 
+if "ppdbidp" in rp.data:
+    print("renaming ppdbidp")
+    rp.data.rename(inplace=True, ppdbidp="pdbidp")
+
 
 def main():
-
-    pdbs = rp.pdb[np.random.choice(len(rp.pdb), 10)].values
-    print(type(pdbs[0]))
-    print("foo bar ars")
-    print(np.sum(rp.pdb in pdbs))
+    subidx = sorted(np.random.choice(len(rp.pdb), 10))
+    rpsub = rp.subset(subidx)
+    rpsub.sanity_check()
+    print(rpsub)
 
 
 if __name__ == "__main__":

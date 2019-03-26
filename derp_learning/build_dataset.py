@@ -284,7 +284,7 @@ def main():
     print("summary of raw data")
     print_summary(dat)
 
-    rp = ResPairData(**dat)
+    rp = ResPairData(raw=dat)
     print(rp)
     del dat
     with open(args.outfile, "wb") as out:

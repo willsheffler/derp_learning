@@ -5,16 +5,19 @@ import numpy as np
 
 
 class ResPairData:
-    def __init__(
-        self,
-        pdbdata,
-        coords,
-        resdata,
-        pairdata,
-        pdb_res_offsets,
-        pdb_pair_offsets,
-        bin_params,
-    ):
+    def __init__(self, raw=None, data=None):
+
+        if data is not None:
+            self.data = data
+            return
+
+        pdbdata = raw["pdbdata"]
+        coords = raw["coords"]
+        resdata = raw["resdata"]
+        pairdata = raw["pairdata"]
+        pdb_res_offsets = raw["pdb_res_offsets"]
+        pdb_pair_offsets = raw["pdb_pair_offsets"]
+        bin_params = raw["bin_params"]
 
         # put this stuff in dataset
 
@@ -38,7 +41,7 @@ class ResPairData:
 
         for k, v in pairdata.items():
             pairdata[k] = (["pairid"], v)
-        pairdata["ppdbidp"] = pairdata["pdbno"]
+        pairdata["pdbidp"] = pairdata["pdbno"]
         del pairdata["pdbno"]
 
         data = {**pdbdata, **resdata, **pairdata}
@@ -70,8 +73,49 @@ class ResPairData:
     def __str__(self):
         return "ResPairData with data = " + str(self.data).replace("\n", "\n  ")
 
-    def drop_nonmatching_pdbids(self):
-        pass
+    def subset(self, keep=None):
+        rp = self.data
+        pdbs = rp.pdb[keep].values
+        mask = np.isin(rp.pdb, pdbs)
+        old2new = np.zeros(len(rp.pdb), "i4") - 1
+        old2new[keep] = np.arange(len(keep))
+        residx = np.isin(rp.pdbidr, keep)
+        pairidx = np.isin(rp.pdbidp, keep)
+        rpsub = rp.sel(pdbid=keep, resid=residx, pairid=pairidx)
+        rpsub.pdbidr.values = old2new[rpsub.pdbidr]
+        rpsub.pdbidp.values = old2new[rpsub.pdbidp]
+        rpsub["pdb_res_offsets"] = np.concatenate([[0], np.cumsum(rpsub.nres)])
+        tmp = np.cumsum(rpsub.pdbidp.groupby(rpsub.pdbidp).count())
+        rpsub["pdb_pair_offsets"] = np.concatenate([[0], tmp])
+        return ResPairData(data=rpsub)
+
+    def sanity_check(self):
+        rp = self.data
+        for ipdb in range(len(rp.pdb)):
+            rlb, rub = rp.pdb_res_offsets.values[ipdb : ipdb + 2]
+            if rlb > 0:
+                assert rp.pdbidr[rlb - 1] == ipdb - 1
+            assert rp.pdbidr[rlb] == ipdb
+            assert rp.pdbidr[rub - 1] == ipdb
+            if ipdb + 1 < len(rp.pdb):
+                assert rp.pdbidr[rub] == ipdb + 1
+            resi = rp.resno[rp.pdbidr == ipdb]
+            assert np.min(resi) == 0
+            assert np.max(resi) == rp.nres[ipdb] - 1
+            plb, pub = rp.pdb_pair_offsets.values[ipdb : ipdb + 2]
+            resi = rp.resi[plb:pub]
+            resj = rp.resj[plb:pub]
+            assert np.min(resi) == 0
+            assert np.max(resi) < rp.nres[ipdb]
+            assert 0 < np.min(resj) < rp.nres[ipdb]
+
+        # sanity check pair distances vs res-res distances
+        pair_resi_idx = rp.pdb_res_offsets[rp.pdbidp] + rp.resi
+        pair_resj_idx = rp.pdb_res_offsets[rp.pdbidp] + rp.resj
+        cbi = rp.cb[pair_resi_idx]
+        cbj = rp.cb[pair_resj_idx]
+        dhat = np.linalg.norm(cbi - cbj, axis=1)
+        assert np.allclose(dhat, rp.dist, atol=1e-3)
 
 
 def _get_pdb_names(files):
