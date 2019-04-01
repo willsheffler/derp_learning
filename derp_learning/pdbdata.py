@@ -44,11 +44,12 @@ def pdbdata(pose, fname):
 
     ncac = get_bb_coords(pose)
     stubs = ncac_to_stubs(ncac).astype("f4")
-    ncac = ncac.astype("f4")
-    cb = get_cb_coords(pose).astype("f4")
+    ncac = ncac
+    cb = get_coords(pose, "CB")
+    o = get_coords(pose, "O")
     com = np.mean(cb, axis=0)
     rg = np.sqrt(np.sum((cb - com) ** 2) / len(cb))
-    coords = dict(ncac=ncac, cb=cb, stubs=stubs, com=com, rg=rg)
+    coords = dict(ncac=ncac, cb=cb, o=o, stubs=stubs, com=com, rg=rg)
     chains = get_chain_bounds(pose)
 
     # one-body stuff
@@ -160,13 +161,16 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
 
 
 def polya_sasa(pose, sasa_probe_vals):
-    M = pyrosetta.rosetta.protocols.simple_moves.MakePolyXMover
+    try:
+        M = pyrosetta.rosetta.protocols.simple_moves.MakePolyXMover
+    except:
+        M = pyrosetta.rosetta.protocols.pose_creation.MakePolyXMover
     m = M("ALA", keep_pro=False, keep_gly=True, keep_disulfide_cys=True)
     polya_pose = pose.clone()
     m.apply(polya_pose)
     sasacalc = pyrosetta.rosetta.core.scoring.sasa.SasaCalc()
 
-    rsdsasa = np.zeros((len(pose), len(sasa_probe_vals)), dtype='f4')
+    rsdsasa = np.zeros((len(pose), len(sasa_probe_vals)), dtype="f4")
     for i, r in enumerate(sasa_probe_vals):
         sasacalc.set_probe_radius(r)
         sasacalc.calculate(polya_pose)
@@ -210,23 +214,23 @@ def get_bb_coords(pose, which_resi=None):
         n_ca_c.append(
             np.array([[n.x, n.y, n.z, 1], [ca.x, ca.y, ca.z, 1], [c.x, c.y, c.z, 1]])
         )
-    return np.stack(n_ca_c).astype("f8")
+    return np.stack(n_ca_c).astype("f4")
 
 
-def get_cb_coords(pose, which_resi=None):
+def get_coords(pose, aname, which_resi=None):
     if which_resi is None:
         which_resi = list(range(1, pose.size() + 1))
-    cbs = []
+    xyzs = []
     for ir in which_resi:
         r = pose.residue(ir)
         if not r.is_protein():
             raise ValueError("non-protein residue %s at position %i" % (r.name(), ir))
-        if r.has("CB"):
-            cb = r.xyz("CB")
+        if r.has(aname):
+            xyz = r.xyz(aname)
         else:
-            cb = r.xyz("CA")
-        cbs.append(np.array([cb.x, cb.y, cb.z, 1]))
-    return np.stack(cbs).astype("f8")
+            xyz = r.xyz("CA")
+        xyzs.append(np.array([xyz.x, xyz.y, xyz.z, 1]))
+    return np.stack(xyzs).astype("f4")
 
 
 def get_chain_bounds(pose):
@@ -270,12 +274,12 @@ def ncac_to_stubs(ncac):
     c = np.cross(a, tgt2)
     c /= np.linalg.norm(c, axis=-1)[:, None]
     b = np.cross(c, a)
-    assert np.allclose(np.sum(a * b, axis=-1), 0)
-    assert np.allclose(np.sum(b * c, axis=-1), 0)
-    assert np.allclose(np.sum(c * a, axis=-1), 0)
-    assert np.allclose(np.linalg.norm(a, axis=-1), 1)
-    assert np.allclose(np.linalg.norm(b, axis=-1), 1)
-    assert np.allclose(np.linalg.norm(c, axis=-1), 1)
+    assert np.allclose(np.sum(a * b, axis=-1), 0, atol=1e-6)
+    assert np.allclose(np.sum(b * c, axis=-1), 0, atol=1e-6)
+    assert np.allclose(np.sum(c * a, axis=-1), 0, atol=1e-6)
+    assert np.allclose(np.linalg.norm(a, axis=-1), 1, atol=1e-6)
+    assert np.allclose(np.linalg.norm(b, axis=-1), 1, atol=1e-6)
+    assert np.allclose(np.linalg.norm(c, axis=-1), 1, atol=1e-6)
     stubs[:, :3, 0] = a
     stubs[:, :3, 1] = b
     stubs[:, :3, 2] = c

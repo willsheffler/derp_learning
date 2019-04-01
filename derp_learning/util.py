@@ -2,6 +2,11 @@ import os
 import glob
 import multiprocessing
 import concurrent.futures
+import threading
+import numba
+
+
+jit = numba.njit(nogil=True, fastmath=True)
 
 
 def cpu_count():

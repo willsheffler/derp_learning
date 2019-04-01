@@ -45,9 +45,9 @@ def process_pdb(fname, storage_dir="."):
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     with open(outfile, "wb") as out:
         _pickle.dump(dat, out)
-    if not os.path.exists(posefile):
-        with open(posefile, "wb") as out:
-            _pickle.dump(pose, out)
+    # if not os.path.exists(posefile):
+    # with open(posefile, "wb") as out:
+    # _pickle.dump(pose, out)
 
 
 def process_parallel(pdbs, max_workers):

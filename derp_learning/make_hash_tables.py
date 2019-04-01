@@ -5,10 +5,11 @@ import numpy as np
 import xarray as xr
 import numba as nb
 from derp_learning.data_types import ResPairData
+from derp_learning.khash import KHashi8i8
 
 
 def load_which_takes_forever():
-    with open("pdb_res_pair_data.pickle", "rb") as inp:
+    with open("datafiles/pdb_res_pair_data.pickle", "rb") as inp:
         return _pickle.load(inp)
 
 
@@ -18,39 +19,8 @@ else:
     respairdat = load_which_takes_forever()
     os.a_very_unique_name = respairdat
 
-if "ppdbidp" in respairdat.data:
-    print("renaming ppdbidp")
-    respairdat.data.rename(inplace=True, ppdbidp="pdbidp")
 
-
-if "seq" in respairdat.data:
-    id2aa = np.array(list("ACDEFGHIKLMNPQRSTVWY"))
-    aa2id = xr.DataArray(np.arange(20, dtype="i4"), [("aa", id2aa)])
-    aaid = aa2id.sel(aa=respairdat.seq).values.astype("i4")
-    respairdat.data["aaid"] = xr.DataArray(aaid, dims=["resid"])
-    respairdat.data = respairdat.data.drop("seq")
-    respairdat.data["id2aa"] = xr.DataArray(id2aa, [aa2id], ["aai"])
-    respairdat.data["aa2id"] = xr.DataArray(aa2id, [id2aa], ["aa"])
-
-    id2ss = np.array(list("EHL"))
-    ss2id = xr.DataArray(np.arange(3, dtype="i4"), [("ss", id2ss)])
-    ssid = ss2id.sel(ss=respairdat.ss).values.astype("i4")
-    respairdat.data["ssid"] = xr.DataArray(ssid, dims=["resid"])
-    respairdat.data = respairdat.data.drop("ss")
-    respairdat.data["id2ss"] = xr.DataArray(id2ss, [ss2id], ["ssi"])
-    respairdat.data["ss2id"] = xr.DataArray(ss2id, [id2ss], ["ss"])
-
-print(respairdat)
-
-
-import sys
-
-sys.exit()
-
-
-nb.njit(nogil=True, fastmath=True)
-
-
+@nb.njit(nogil=True, fastmath=True)
 def identical_ranges(x):
     assert x.ndim == 1
     prev = -1
@@ -70,35 +40,81 @@ def identical_ranges(x):
     return vals[:n].copy(), ranges[:n].copy()
 
 
-def main():
-    rp = respairdat.subset(10)
-    print("sanity_check")
-    rp.sanity_check()
+def make_xarray_binner(rp, bintype):
+    binid = rp.data[bintype].values
+    bin_srange2pairid = np.argsort(binid)
+    sorted_binids = binid[bin_srange2pairid]
+    binkeys, binvals = identical_ranges(sorted_binids)
+    bin_srange = xr.DataArray(binvals, [("binidx", binkeys), ("bound", ["lb", "ub"])])
+    return bin_srange, bin_srange2pairid
 
-    bintype = "xijbin_2.0_30"
-    bins = rp.data[bintype].values
-    print("argsort bin")
-    order = np.argsort(bins)
-    sbins = bins[order]
-    print("identical_ranges")
-    vals, ranges = identical_ranges(sbins)
-    ninbin = ranges[:, 1] - ranges[:, 0]
+
+def make_numba_binner(rp, bintype):
+    binid = rp.data[bintype].values
+    bin_srange2pairid = np.argsort(binid)
+    sorted_binids = binid[bin_srange2pairid]
+    binkeys, ranges = identical_ranges(sorted_binids)
+    binvals = ranges[:, 1].astype("i8") + np.left_shift(ranges[:, 0].astype("i8"), 32)
+    bin_srange = KHashi8i8()
+    bin_srange.update2(binkeys, binvals)
+
+    assert np.all(ranges >= 0)
+    assert np.all(binvals >= 0)
+    assert bin_srange.size() == len(binkeys)
+    assert np.all(bin_srange.array_get(binkeys) == binvals)
+    assert np.all(np.right_shift(binvals, 32) == ranges[:, 0])
+    assert np.all(binvals.astype("i4") == ranges[:, 1])
+
+    return bin_srange, bin_srange2pairid
+
+
+def get_bin_info(rp, bintype):
+    bin_srange, bin_srange2pairid = make_xarray_binner(rp, bintype)
+
+    ninbin = bin_srange.sel(bound="ub") - bin_srange.sel(bound="lb")
     assert np.all(ninbin > 0)
-    print("frac not one", np.sum(ninbin != 1) / len(ranges))
-    print(ninbin[ninbin != 1])
+    # print("frac not one", np.sum(ninbin != 1) / len(binvals))
+    # h = np.histogram(ninbin, bins="sturges")
+    ssep = rp.resj - rp.resi  # offsets cancel
+    unique, counts = np.unique(ninbin, return_counts=True)
+    print("bin_count: nbins_wtih_count", dict(zip(unique, counts)))
 
-    print(ranges.shape)
-    binner = xr.DataArray(ranges, [("binidx", vals), ("lbub", ["lb", "ub"])])
-    print(binner)
-    sel = binner.sel(binidx=sbins)
-    print(ranges.shape)
-    print(sel.shape)
+    topbins = np.argsort(-ninbin).values[:10]
+    for ibin in topbins:
+        sep = ssep[rp[bintype] == bin_srange.binidx[ibin]].values
+        print("xbin size", ninbin[ibin].values, "seqsep", np.mean(sep))
 
-    for i in np.random.choice(len(bins), 10):
-        lb, ub = binner.sel(binidx=bins[i]).values
-        assert np.all(rp.data[bintype][order[lb:ub]] == bins[i])
+    # sanity check, all members of bin have bind == binkey
+    binid = rp[bintype]
+    sel = bin_srange.sel(binidx=binid[bin_srange2pairid])
+    for pairid in np.random.choice(len(rp.pairid), 100):
+        lb, ub = bin_srange.sel(binidx=binid[pairid]).values
+        assert np.all(rp.data[bintype][bin_srange2pairid[lb:ub]] == binid[pairid])
 
-    binsp = xr.DataArray(np.zeros(len(vals), 20))
+
+def make_seq_prof_xbins(t, v, bintype):
+    prof = np.zeros((len(v.resid), 20))
+    bin_srange, bin_srange2pairid = make_xarray_binner(t, bintype)
+
+    print(bin_srange)
+    print(bin_srange2pairid)
+
+
+def main():
+    # vectorized accumulate 1-hot style
+    x = np.array([0])
+    np.add.at(x, np.repeat(0, 5), 1)
+    assert x[0] == 5
+
+    rp = respairdat.subset(10, random=0, sanity_check=True)
+
+    binners = {bintype: make_numba_binner(rp, bintype) for bintype in rp.xbin_types}
+    print(binners)
+
+    get_bin_info(rp, "xijbin_2.0_30")
+
+    # train, valid = rp.split(0.5)
+    # make_seq_prof_xbins(train, valid, "xijbin_2.0_30")
 
 
 if __name__ == "__main__":

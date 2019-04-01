@@ -3,7 +3,7 @@ import sys
 import random
 import _pickle
 import argparse
-from time import clock
+from time import perf_counter
 import concurrent.futures as cf
 
 from tqdm import tqdm
@@ -41,10 +41,13 @@ def process_pdb_data(fnames, parallel):
     pdbdata = dict(pdb=pdb, nres=nres, chains=chains, com=com, rg=rg)
 
     print("make per-residue data")
-    ncac = np.concatenate([x["coords"]["ncac"] for x in raw])
+    n = np.concatenate([x["coords"]["ncac"][:, 0] for x in raw])
+    ca = np.concatenate([x["coords"]["ncac"][:, 1] for x in raw])
+    c = np.concatenate([x["coords"]["ncac"][:, 2] for x in raw])
     cb = np.concatenate([x["coords"]["cb"] for x in raw])
+    o = np.concatenate([x["coords"]["o"] for x in raw])
     stubs = np.concatenate([x["coords"]["stubs"] for x in raw])
-    coords = dict(ncac=ncac, cb=cb, stubs=stubs)
+    coords = dict(n=n, ca=ca, c=c, o=o, cb=cb, stubs=stubs)
 
     resdata = dict()
     resdata["pdbno"] = [np.repeat(i, len(x["coords"]["cb"])) for i, x in enumerate(raw)]
@@ -167,7 +170,7 @@ def compute_pair_xform_bins(dat, parallel=-1):
     pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resi"]
     pair_resj_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resj"]
 
-    t = clock()
+    t = perf_counter()
     pair_stubi = stubs[pair_resi_idx]
     pair_stubj = stubs[pair_resj_idx]
     print("make xij")
@@ -175,7 +178,7 @@ def compute_pair_xform_bins(dat, parallel=-1):
     print("make xji")
     xji = np.linalg.inv(pair_stubj) @ pair_stubi
     # assert np.allclose(xij @ xji, np.eye(4), atol=1e-3)  # floats kinda suck...
-    print("make stubs & xij time", clock() - t)
+    print("make stubs & xij time", perf_counter() - t)
 
     print("compute bins")
     cart_resl = [0.5, 1.0, 2.0]
@@ -183,22 +186,23 @@ def compute_pair_xform_bins(dat, parallel=-1):
     bin_parms = [(c, o) for c in cart_resl for o in ori_resl]
     dat["bin_params"] = bin_parms
 
-    # t = clock()
+    # t = perf_counter()
     indexers = [
         # xbin.gu_xbin_indexer(cart_resl=2.0, ori_resl=15.0) for c, o in bin_parms,
         xbin.XformBinner(c, o)
         for c, o in bin_parms
     ]
-    # print("numba compile time", clock() - t)
+    # print("numba compile time", perf_counter() - t)
 
     nparts = 1024
     split_xs = [np.array_split(xij, nparts), np.array_split(xji, nparts)]
 
-    t = clock()
+    t = perf_counter()
+    dat["xbin_types"] = list()
     with get_process_executor(parallel) as pool:
         for i, indexer in enumerate(indexers):
             for j, split_x in enumerate(split_xs):
-                t2 = clock()
+                t2 = perf_counter()
                 futures = list()
                 for part in split_x:
                     futures.append(pool.submit(indexer.get_bin_index, part))
@@ -212,12 +216,18 @@ def compute_pair_xform_bins(dat, parallel=-1):
                 assert len(result) == len(pairdata["dist"])
                 lbl = str(bin_parms[i][0]) + "_" + str(bin_parms[i][1])
                 lbl = ["xijbin", "xjibin"][j] + "_" + lbl
+                dat["xbin_types"].append(lbl)
                 pairdata[lbl] = result
-                print("compute bins", i, j, lbl, "time", clock() - t2)
+                # print("compute bins", i, j, lbl, "time", perf_counter() - t2)
 
-    print("binning time", clock() - t)
+    dat["xbin_swap_type"] = {
+        x: x.replace("i", "?").replace("j", "i").replace("?", "j")
+        for x in dat["xbin_types"]
+    }
 
-    return
+    print("binning time", perf_counter() - t)
+
+    return dat
 
 
 def print_summary(dat):
@@ -266,15 +276,15 @@ def main():
     # if os.path.exists("__HACK_TMP_FILE.pickle"):
     # print("reading hacky tmp file")
     # with open("__HACK_TMP_FILE.pickle", "rb") as inp:
-    # t = clock()
+    # t = perf_counter()
     # print("loading hack tmp pickle")
     # dat = _pickle.load(inp)
-    # print("loading hack tmp pickle done", clock() - t)
+    # print("loading hack tmp pickle done", perf_counter() - t)
     # else:
 
     dat = process_pdb_data(fnames, args.parallel)
 
-    compute_pair_xform_bins(dat, args.parallel)
+    dat = compute_pair_xform_bins(dat, args.parallel)
 
     #
     # with open("__HACK_TMP_FILE.pickle", "wb") as out:
@@ -284,9 +294,14 @@ def main():
     print("summary of raw data")
     print_summary(dat)
 
-    rp = ResPairData(raw=dat)
-    print(rp)
+    rp = ResPairData(dat)
     del dat
+
+    print(rp)
+
+    for t in rp.xbin_types:
+        print("xbin_swap_type", t, "->", rp.xbin_swap_type[t])
+
     with open(args.outfile, "wb") as out:
         _pickle.dump(rp, out)
 
