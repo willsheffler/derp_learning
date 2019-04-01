@@ -75,7 +75,7 @@ def get_bin_info(rp, bintype):
     assert np.all(ninbin > 0)
     # print("frac not one", np.sum(ninbin != 1) / len(binvals))
     # h = np.histogram(ninbin, bins="sturges")
-    ssep = rp.resj - rp.resi  # offsets cancel
+    ssep = rp.p_resj - rp.p_resi  # offsets cancel
     unique, counts = np.unique(ninbin, return_counts=True)
     print("bin_count: nbins_wtih_count", dict(zip(unique, counts)))
 
@@ -101,6 +101,45 @@ def make_seq_prof_xbins(t, v, bintype):
 
 
 def main():
+
+    st = [
+        "fa_atr",
+        "fa_rep",
+        "fa_sol",
+        "fa_intra_atr_xover4",
+        "fa_intra_rep_xover4",
+        "fa_intra_sol_xover4",
+        "lk_ball",
+        "lk_ball_iso",
+        "lk_ball_bridge",
+        "lk_ball_bridge_uncpl",
+        "fa_elec",
+        "fa_intra_elec",
+        "pro_close",
+        "hbond_sr_bb",
+        "hbond_lr_bb",
+        "hbond_bb_sc",
+        "hb_sc",
+        "dslf_fa13",
+        "rama_prepro",
+        "omega",
+        "p_aa_pp",
+        "fa_dun_rot",
+        "fa_dun_dev",
+        "fa_dun_semi",
+        "hxl_tors",
+        "ref",
+    ]
+    mag = [
+        np.mean(np.abs(respairdat["t_" + x].values)) * respairdat.eweights[x]
+        for x in st
+    ]
+    for i in np.argsort(mag):
+        print(st[i], mag[i])
+    import sys
+
+    sys.exit()
+
     # vectorized accumulate 1-hot style
     x = np.array([0])
     np.add.at(x, np.repeat(0, 5), 1)

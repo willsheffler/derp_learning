@@ -2,6 +2,36 @@ import numpy as np
 import pyrosetta
 
 
+all_score_types = {
+    "fa_atr": pyrosetta.rosetta.core.scoring.ScoreType.fa_atr,
+    "fa_rep": pyrosetta.rosetta.core.scoring.ScoreType.fa_rep,
+    "fa_sol": pyrosetta.rosetta.core.scoring.ScoreType.fa_sol,
+    "fa_intra_atr_xover4": pyrosetta.rosetta.core.scoring.ScoreType.fa_intra_atr_xover4,
+    "fa_intra_rep_xover4": pyrosetta.rosetta.core.scoring.ScoreType.fa_intra_rep_xover4,
+    "fa_intra_sol_xover4": pyrosetta.rosetta.core.scoring.ScoreType.fa_intra_sol_xover4,
+    "lk_ball": pyrosetta.rosetta.core.scoring.ScoreType.lk_ball,
+    "lk_ball_iso": pyrosetta.rosetta.core.scoring.ScoreType.lk_ball_iso,
+    "lk_ball_bridge": pyrosetta.rosetta.core.scoring.ScoreType.lk_ball_bridge,
+    "lk_ball_bridge_uncpl": pyrosetta.rosetta.core.scoring.ScoreType.lk_ball_bridge_uncpl,
+    "fa_elec": pyrosetta.rosetta.core.scoring.ScoreType.fa_elec,
+    "fa_intra_elec": pyrosetta.rosetta.core.scoring.ScoreType.fa_intra_elec,
+    "pro_close": pyrosetta.rosetta.core.scoring.ScoreType.pro_close,
+    "hbond_sr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sr_bb,
+    "hbond_lr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_lr_bb,
+    "hbond_bb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_bb_sc,
+    "hb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sc,
+    "dslf_fa13": pyrosetta.rosetta.core.scoring.ScoreType.dslf_fa13,
+    "rama_prepro": pyrosetta.rosetta.core.scoring.ScoreType.rama_prepro,
+    "omega": pyrosetta.rosetta.core.scoring.ScoreType.omega,
+    "p_aa_pp": pyrosetta.rosetta.core.scoring.ScoreType.p_aa_pp,
+    "fa_dun_rot": pyrosetta.rosetta.core.scoring.ScoreType.fa_dun_rot,
+    "fa_dun_dev": pyrosetta.rosetta.core.scoring.ScoreType.fa_dun_dev,
+    "fa_dun_semi": pyrosetta.rosetta.core.scoring.ScoreType.fa_dun_semi,
+    "hxl_tors": pyrosetta.rosetta.core.scoring.ScoreType.hxl_tors,
+    "ref": pyrosetta.rosetta.core.scoring.ScoreType.ref,
+}
+
+
 score_types = {
     "fa_atr": pyrosetta.rosetta.core.scoring.ScoreType.fa_atr,
     "fa_rep": pyrosetta.rosetta.core.scoring.ScoreType.fa_rep,
@@ -40,6 +70,15 @@ def pdbdata(pose, fname):
     sf.set_energy_method_options(sfopt)
     sf(pose)
 
+    energies = {
+        "t_" + k: pose.energies().total_energies()[st]
+        for k, st in all_score_types.items()
+    }
+    energiesw = {
+        "t_w_" + k: pose.energies().weights()[st] * pose.energies().total_energies()[st]
+        for k, st in all_score_types.items()
+    }
+    eweights = {k: pose.energies().weights()[st] for k, st in all_score_types.items()}
     # coords, etc
 
     ncac = get_bb_coords(pose)
@@ -69,6 +108,13 @@ def pdbdata(pose, fname):
     resdata["seq"] = pose.sequence()
     resdata["ss"] = pyrosetta.rosetta.core.scoring.dssp.Dssp(pose).get_dssp_secstruct()
     resdata["chain"] = [pose.chain(i) - 1 for i in range(1, len(pose) + 1)]
+    for k, st in all_score_types.items():
+        tmp = list()
+        for ir in range(len(pose)):
+            tmp.append(pose.energies().residue_total_energies(ir + 1)[st])
+        resdata["r_" + k] = np.array(tmp, np.float32)
+    tmp = [pose.energies().residue_total_energy(i + 1) for i in range(len(pose))]
+    resdata["r_etot"] = np.array(tmp, np.float32)
 
     # print(fname, "compute sasa")
     sasa_probe_vals = np.array([2, 3, 4])
@@ -85,7 +131,14 @@ def pdbdata(pose, fname):
     pairdata = extract_pair_terms(**vars())
 
     return dict(
-        fname=fname, coords=coords, chains=chains, resdata=resdata, pairdata=pairdata
+        fname=fname,
+        coords=coords,
+        chains=chains,
+        resdata=resdata,
+        pairdata=pairdata,
+        energies=energies,
+        energiesw=energiesw,
+        eweights=eweights,
     )
 
 
@@ -126,9 +179,10 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
     hbonds = extract_hbond_terms(pose, fname)
 
     # print(fname, "extract pair energies")
-    lbls = ["dist", "etot", "resi", "resj"]
+    lbls = ["p_dist", "p_etot", "p_resi", "p_resj"]
     hb_lbls = ["hb_bb_bb", "hb_bb_sc", "hb_sc_bb", "hb_sc_sc"]
-    lbls += hb_lbls + list(score_types.keys())
+    lbls += ["p_" + l for l in hb_lbls]
+    lbls += ["p_" + l for l in score_types]
     pairterms = {k: list() for k in lbls}
     for ichain, chain in enumerate(chains):
         if ichain != sym_chain_follows[ichain]:
@@ -144,19 +198,19 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
                 etot = edge.dot(eweights)
                 if etot == 0.0:
                     continue
-                pairterms["resi"].append(ir)
-                pairterms["resj"].append(jr)
-                pairterms["dist"].append(np.sqrt(edge.square_distance()))
-                pairterms["etot"].append(etot)
+                pairterms["p_resi"].append(ir)
+                pairterms["p_resj"].append(jr)
+                pairterms["p_dist"].append(np.sqrt(edge.square_distance()))
+                pairterms["p_etot"].append(etot)
                 for lbl in hb_lbls:
                     h = hbonds[lbl][(ir, jr)] if (ir, jr) in hbonds[lbl] else 0
-                    pairterms[lbl].append(h)
+                    pairterms["p_" + lbl].append(h)
                 for lbl, st in score_types.items():
-                    pairterms[lbl].append(edge[st])
-    for k in pairterms.keys():
+                    pairterms["p_" + lbl].append(edge[st])
+    for k in pairterms:
         pairterms[k] = np.array(pairterms[k], "f4")
     for v in pairterms.values():
-        assert len(v) == len(pairterms["dist"])
+        assert len(v) == len(pairterms["p_dist"])
     return pairterms
 
 

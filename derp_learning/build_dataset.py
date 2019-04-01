@@ -31,14 +31,19 @@ def process_pdb_data(fnames, parallel):
         sys.exit()
 
     raw = [load(f) for f in tqdm(fnames, "reading data files")]
+    sanity_check_raw(raw)
 
     print("make per-structure data")
     pdb = [x["fname"] for x in raw]
     chains = [x["chains"] for x in raw]
     com = np.stack([x["coords"]["com"] for x in raw])
-    rg = np.array([x["coords"]["rg"] for x in raw])
+    rg = np.array([x["coords"]["rg"] for x in raw], np.float32)
     nres = np.array([len(x["coords"]["cb"]) for x in raw])
     pdbdata = dict(pdb=pdb, nres=nres, chains=chains, com=com, rg=rg)
+    pdbenergies = {
+        k: np.array([v["energies"][k] for v in raw], "f4") for k in raw[0]["energies"]
+    }
+    pdbdata = {**pdbdata, **pdbenergies}
 
     print("make per-residue data")
     n = np.concatenate([x["coords"]["ncac"][:, 0] for x in raw])
@@ -72,25 +77,25 @@ def process_pdb_data(fnames, parallel):
     pairdata = dict()
     for name in tqdm(raw[0]["pairdata"], "make residue pair data"):
         pairdata[name] = np.concatenate([x["pairdata"][name] for x in raw])
-    pairdata["resi"] = pairdata["resi"].astype("i4")
-    pairdata["resj"] = pairdata["resj"].astype("i4")
+    pairdata["p_resi"] = pairdata["p_resi"].astype("i4")
+    pairdata["p_resj"] = pairdata["p_resj"].astype("i4")
 
-    pdb_pair_offsets = np.cumsum([len(x["pairdata"]["dist"]) for x in raw])
+    pdb_pair_offsets = np.cumsum([len(x["pairdata"]["p_dist"]) for x in raw])
     pdb_pair_offsets = np.concatenate([[0], pdb_pair_offsets])
-    tmp = [np.repeat(i, len(x["pairdata"]["dist"])) for i, x in enumerate(raw)]
+    tmp = [np.repeat(i, len(x["pairdata"]["p_dist"])) for i, x in enumerate(raw)]
     pairdata["pdbno"] = np.concatenate(tmp).astype("i4")
     sanity_check_pair_res_relation(**vars())
 
     tot_nres = len(resdata["phi"])
-    tot_pairs = len(pairdata["dist"])
+    tot_pairs = len(pairdata["p_dist"])
 
     print("sanity check pair distances vs res-res distances")
-    pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resi"]
-    pair_resj_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resj"]
+    pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["p_resi"]
+    pair_resj_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["p_resj"]
     cbi = cb[pair_resi_idx]
     cbj = cb[pair_resj_idx]
     dhat = np.linalg.norm(cbi - cbj, axis=1)
-    assert np.allclose(dhat, pairdata["dist"], atol=1e-3)
+    assert np.allclose(dhat, pairdata["p_dist"], atol=1e-3)
 
     print(f"returning: nstruct {len(pdb):,} nres {tot_nres:,} npairs {tot_pairs:,}")
     return dict(
@@ -100,17 +105,25 @@ def process_pdb_data(fnames, parallel):
         pairdata=pairdata,
         pdb_pair_offsets=pdb_pair_offsets,
         pdb_res_offsets=pdb_res_offsets,
+        eweights=raw[0]["eweights"],
     )
+
+
+def sanity_check_raw(raw):
+    w0 = raw[0]["eweights"]
+    print(w0)
+    for r in raw:
+        assert r["eweights"] == w0
 
 
 def _compute_nnb(res_cb, nbdists):
     nnb = list()
     # 0.000001 hack to avoid some stupid sqrt err in np.linalg.norm
     diff = np.abs(res_cb[None, :] - res_cb[:, None]) + 0.000_001
-    dist = np.linalg.norm(diff, axis=2)
+    p_dist = np.linalg.norm(diff, axis=2)
     for nbdist in nbdists:
         lbl = "nnb" + str(nbdist)
-        nnb.append(np.sum(dist <= nbdist, axis=1) - 1)
+        nnb.append(np.sum(p_dist <= nbdist, axis=1) - 1)
     return nnb
 
 
@@ -146,29 +159,29 @@ def sanity_check_pair_res_relation(pdb, nres, pdb_pair_offsets, pairdata, **kw):
         try:
             if i < 100:
                 pdbi = pairdata["pdbno"] == i
-            for tmp in ("resi", "resj"):
+            for tmp in ("p_resi", "p_resj"):
                 if i < 100:
                     residx = pairdata[tmp][pdbi]
                     assert max(residx) < nres[i]
-                    assert min(residx) == 0 or tmp == "resj"
+                    assert min(residx) == 0 or tmp == "p_resj"
                 lb, ub = pdb_pair_offsets[i : i + 2]
                 residx = pairdata[tmp][lb:ub]
                 assert max(residx) < nres[i]
-                assert min(residx) == 0 or tmp == "resj"
+                assert min(residx) == 0 or tmp == "p_resj"
         except AssertionError as e:
             print("Error on", pdb[i])
             raise e
 
 
 def compute_pair_xform_bins(dat, parallel=-1):
-    print(f"compute binnings for {len(dat['pairdata']['dist'])*2:,} pairs")
+    print(f"compute binnings for {len(dat['pairdata']['p_dist'])*2:,} pairs")
 
     pdb_res_offsets = dat["pdb_res_offsets"]
     pairdata = dat["pairdata"]
     stubs = dat["coords"]["stubs"]
 
-    pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resi"]
-    pair_resj_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["resj"]
+    pair_resi_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["p_resi"]
+    pair_resj_idx = pdb_res_offsets[pairdata["pdbno"]] + pairdata["p_resj"]
 
     t = perf_counter()
     pair_stubi = stubs[pair_resi_idx]
@@ -209,11 +222,11 @@ def compute_pair_xform_bins(dat, parallel=-1):
 
                 xhat = indexer.get_bin_center(futures[0].result())
                 d = np.linalg.norm(xhat[:, :, 3] - split_x[0][:, :, 3], axis=1)
-                # print("dist err", bin_parms[i], np.mean(d), np.min(d), np.max(d))
+                # print("p_dist err", bin_parms[i], np.mean(d), np.min(d), np.max(d))
                 assert np.max(d) < bin_parms[i][0] * 1.5
 
                 result = np.concatenate([f.result() for f in futures])
-                assert len(result) == len(pairdata["dist"])
+                assert len(result) == len(pairdata["p_dist"])
                 lbl = str(bin_parms[i][0]) + "_" + str(bin_parms[i][1])
                 lbl = ["xijbin", "xjibin"][j] + "_" + lbl
                 dat["xbin_types"].append(lbl)
@@ -234,7 +247,7 @@ def print_summary(dat):
     print("  pdbdata")
     npdb = len(dat["pdbdata"]["nres"])
     nres = np.sum(dat["pdbdata"]["nres"])
-    npair = len(dat["pairdata"]["dist"])
+    npair = len(dat["pairdata"]["p_dist"])
     for k, v in dat["pdbdata"].items():
         print("   ", k, f"{v.shape if hasattr(v, 'shape') else len(v)}")
         assert len(v) == npdb

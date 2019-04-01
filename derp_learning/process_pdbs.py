@@ -35,12 +35,12 @@ def process_pdb(fname, storage_dir="."):
         # print("ERROR pyrosetta can't read", fname)
         return fname
 
-    try:
-        dat = pdbdata(pose, fname)
-    except Exception as e:
-        print("ERROR can't process pose from", fname)
-        print("   ", e)
-        return fname
+    # try:
+    dat = pdbdata(pose, fname)
+    # except Exception as e:
+    # print("ERROR can't process pose from", fname)
+    # print("   ", e)
+    # return fname
 
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     with open(outfile, "wb") as out:

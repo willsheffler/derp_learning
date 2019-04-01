@@ -51,13 +51,23 @@ class ResPairData:
         resdata["o"] = (["resid", "xyzw"], coords["o"])
         resdata["cb"] = (["resid", "xyzw"], coords["cb"])
         resdata["stub"] = (["resid", "hrow", "hcol"], coords["stubs"])
-        resdata["pdbidr"] = resdata["pdbno"]
+        resdata["r_pdbid"] = resdata["pdbno"]
         del resdata["pdbno"]
 
         for k, v in pairdata.items():
             pairdata[k] = (["pairid"], v)
-        pairdata["pdbidp"] = pairdata["pdbno"]
+        pairdata["p_pdbid"] = pairdata["pdbno"]
         del pairdata["pdbno"]
+
+        if len(pdbdata.keys() & resdata.keys()):
+            print(pdbdata.keys() & resdata.keys())
+            assert 0 == len(pdbdata.keys() & resdata.keys())
+        if len(pdbdata.keys() & pairdata.keys()):
+            print(pdbdata.keys() & pairdata.keys())
+            assert 0 == len(pdbdata.keys() & pairdata.keys())
+        if len(pairdata.keys() & resdata.keys()):
+            print(pairdata.keys() & resdata.keys())
+            assert 0 == len(pairdata.keys() & resdata.keys())
 
         data = {**pdbdata, **resdata, **pairdata}
         assert len(data) == len(pdbdata) + len(resdata) + len(pairdata)
@@ -74,14 +84,15 @@ class ResPairData:
                 xbin_params=bin_params,
                 xbin_types=raw["xbin_types"],
                 xbin_swap_type=raw["xbin_swap_type"],
+                eweights=raw["eweights"],
             ),
         )
 
         self.change_seq_ss_to_ids()
 
-        res_ofst = self.pdb_res_offsets[self.pdbidp]
-        self.data["resi"] += res_ofst
-        self.data["resj"] += res_ofst
+        res_ofst = self.pdb_res_offsets[self.p_pdbid]
+        self.data["p_resi"] += res_ofst
+        self.data["p_resj"] += res_ofst
 
         assert self.data.stub.sel(hcol="t").shape[1] == 4
         assert np.all(self.data.ca.sel(xyzw="w") == 1)
@@ -103,9 +114,6 @@ class ResPairData:
 
     def change_seq_ss_to_ids(self):
         dat = self.data
-        if "ppdbidp" in dat:
-            print("renaming ppdbidp to pdbidp")
-            dat.rename(inplace=True, ppdbidp="pdbidp")
 
         id2aa = np.array(list("ACDEFGHIKLMNPQRSTVWY"))
         aa2id = xr.DataArray(np.arange(20, dtype="i4"), [("aa", id2aa)])
@@ -135,20 +143,20 @@ class ResPairData:
         mask = np.isin(rp.pdb, pdbs)
         old2new = np.zeros(len(rp.pdb), "i4") - 1
         old2new[keep] = np.arange(len(keep))
-        residx = np.isin(rp.pdbidr, keep)
-        pairidx = np.isin(rp.pdbidp, keep)
+        residx = np.isin(rp.r_pdbid, keep)
+        pairidx = np.isin(rp.p_pdbid, keep)
         rpsub = rp.sel(pdbid=keep, resid=residx, pairid=pairidx)
 
         # update relational stuff
-        rpsub.pdbidr.values = old2new[rpsub.pdbidr]
-        rpsub.pdbidp.values = old2new[rpsub.pdbidp]
+        rpsub.r_pdbid.values = old2new[rpsub.r_pdbid]
+        rpsub.p_pdbid.values = old2new[rpsub.p_pdbid]
         rpsub.attrs["pdb_res_offsets"] = np.concatenate([[0], np.cumsum(rpsub.nres)])
-        tmp = np.cumsum(rpsub.pdbidp.groupby(rpsub.pdbidp).count())
+        tmp = np.cumsum(rpsub.p_pdbid.groupby(rpsub.p_pdbid).count())
         rpsub.attrs["pdb_pair_offsets"] = np.concatenate([[0], tmp])
-        old_res_ofst = rp.pdb_res_offsets[rpsub.pdbidp]
-        new_res_ofst = rpsub.pdb_res_offsets[rpsub.pdbidp]
-        rpsub["resi"] += new_res_ofst - new_res_ofst
-        rpsub["resj"] += new_res_ofst - new_res_ofst
+        old_res_ofst = rp.pdb_res_offsets[rpsub.p_pdbid]
+        new_res_ofst = rpsub.pdb_res_offsets[rpsub.p_pdbid]
+        rpsub["p_resi"] += new_res_ofst - new_res_ofst
+        rpsub["p_resj"] += new_res_ofst - new_res_ofst
 
         rp = ResPairData(rpsub)
         if sanity_check:
@@ -171,28 +179,28 @@ class ResPairData:
         for ipdb in np.random.choice(Npdb, min(Npdb, 100), replace=False):
             rlb, rub = rp.pdb_res_offsets[ipdb : ipdb + 2]
             if rlb > 0:
-                assert rp.pdbidr[rlb - 1] == ipdb - 1
-            assert rp.pdbidr[rlb] == ipdb
-            assert rp.pdbidr[rub - 1] == ipdb
+                assert rp.r_pdbid[rlb - 1] == ipdb - 1
+            assert rp.r_pdbid[rlb] == ipdb
+            assert rp.r_pdbid[rub - 1] == ipdb
             if ipdb + 1 < len(rp.pdb):
-                assert rp.pdbidr[rub] == ipdb + 1
-            resi = rp.resno[rp.pdbidr == ipdb]
-            assert np.min(resi) == 0
-            assert np.max(resi) == rp.nres[ipdb] - 1
+                assert rp.r_pdbid[rub] == ipdb + 1
+            p_resi = rp.resno[rp.r_pdbid == ipdb]
+            assert np.min(p_resi) == 0
+            assert np.max(p_resi) == rp.nres[ipdb] - 1
             plb, pub = rp.pdb_pair_offsets[ipdb : ipdb + 2]
-            resi = rp.resi[plb:pub] - rp.pdb_res_offsets[ipdb]
-            resj = rp.resj[plb:pub] - rp.pdb_res_offsets[ipdb]
-            assert np.min(resi) == 0
-            assert np.max(resi) < rp.nres[ipdb]
-            assert 0 < np.min(resj) < rp.nres[ipdb]
+            p_resi = rp.p_resi[plb:pub] - rp.pdb_res_offsets[ipdb]
+            p_resj = rp.p_resj[plb:pub] - rp.pdb_res_offsets[ipdb]
+            assert np.min(p_resi) == 0
+            assert np.max(p_resi) < rp.nres[ipdb]
+            assert 0 < np.min(p_resj) < rp.nres[ipdb]
 
-        assert np.all(rp.resi - rp.pdb_res_offsets[rp.pdbidp] == rp.resno[rp.resi])
+        assert np.all(rp.p_resi - rp.pdb_res_offsets[rp.p_pdbid] == rp.resno[rp.p_resi])
 
         # sanity check pair distances vs res-res distances
-        cbi = rp.cb[rp.resi]
-        cbj = rp.cb[rp.resj]
+        cbi = rp.cb[rp.p_resi]
+        cbj = rp.cb[rp.p_resj]
         dhat = np.linalg.norm(cbi - cbj, axis=1)
-        assert np.allclose(dhat, rp.dist, atol=1e-3)
+        assert np.allclose(dhat, rp.p_dist, atol=1e-3)
 
 
 def _get_pdb_names(files):
