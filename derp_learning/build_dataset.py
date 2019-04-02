@@ -4,7 +4,6 @@ import random
 import _pickle
 import argparse
 from time import perf_counter
-import concurrent.futures as cf
 
 from tqdm import tqdm
 import numpy as np
@@ -12,11 +11,7 @@ import xarray as xr
 
 import xbin
 from derp_learning.data_types import ResPairData
-from derp_learning.util import (
-    InProcessExecutor,
-    fnames_from_arg_list,
-    get_process_executor,
-)
+from derp_learning.util import fnames_from_arg_list, get_process_executor
 
 
 def load(fname):

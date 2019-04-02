@@ -132,42 +132,41 @@ class ResPairData:
         dat["ss2id"] = xr.DataArray(ss2id, [id2ss], ["ss"])
         self.data = dat
 
-    def subset(self, keep=None, random=True, sanity_check=False):
+    def subset_by_pdb(self, keep=None, random=True, sanity_check=False):
+        """keep subset of data in same order as original"""
         if isinstance(keep, (int, np.int32, np.int64)):
             if random:
                 keep = np.random.choice(len(self.pdb), keep, replace=False)
             else:
                 keep = np.arange(keep)
-        else:
-            keep = np.array(list(keep))
-        rp = self.data
-        pdbs = rp.pdb[keep].values
-        mask = np.isin(rp.pdb, pdbs)
-        old2new = np.zeros(len(rp.pdb), "i4") - 1
-        old2new[keep] = np.arange(len(keep))
-        residx = np.isin(rp.r_pdbid, keep)
-        pairidx = np.isin(rp.p_pdbid, keep)
-        rpsub = rp.sel(pdbid=keep, resid=residx, pairid=pairidx)
+        keep = np.array(sorted(keep))
 
-        # update relational stuff
-        rpsub.r_pdbid.values = old2new[rpsub.r_pdbid]
-        rpsub.p_pdbid.values = old2new[rpsub.p_pdbid]
-        new_pdb_res_offsets = np.concatenate([[0], np.cumsum(rpsub.nres)])
-        rpsub.attrs["pdb_res_offsets"] = new_pdb_res_offsets
+        residx = np.isin(self.data.r_pdbid, keep)
+        pairidx = np.isin(self.data.p_pdbid, keep)
+        rpsub = self.data.sel(pdbid=keep, resid=residx, pairid=pairidx)
+
+        _update_relational_data(rpsub, self.data.pdb_res_offsets, keep)
+
+        new = ResPairData(rpsub)
+        if sanity_check:
+            new.sanity_check()
+        return new
+
+    def subset_by_pair(self, keep, sanity_check=False):
+        rpsub = self.data.sel(pairid=keep)
+
         tmp = np.cumsum(rpsub.p_pdbid.groupby(rpsub.p_pdbid).count())
         new_pdb_pair_offsets = np.concatenate([[0], tmp])
         rpsub.attrs["pdb_pair_offsets"] = new_pdb_pair_offsets
-        old_res_ofst = rp.pdb_res_offsets[keep[rpsub.p_pdbid]]
-        new_res_ofst = new_pdb_res_offsets[rpsub.p_pdbid]
-        rpsub["p_resi"] += new_res_ofst - old_res_ofst
-        rpsub["p_resj"] += new_res_ofst - old_res_ofst
 
-        rp = ResPairData(rpsub)
+        # _update_relational_data(rpsub, self.data.pdb_res_offsets)
+
+        new = ResPairData(rpsub)
         if sanity_check:
-            rp.sanity_check()
-        return rp
+            new.sanity_check()
+        return new
 
-    def split(self, frac, random=True, **kw):
+    def split_by_pdb(self, frac, random=True, **kw):
         n1 = int(len(self.pdb) * frac)
         n2 = len(self.pdb) - n1
         if random:
@@ -177,16 +176,16 @@ class ResPairData:
         else:
             part1 = np.arange(n1)
             part2 = np.arange(n1, len(self.pdb))
-        parts = [part1, part2]
-        return [self.subset(part, **kw) for part in parts]
+        parts = [sorted(part1), sorted(part2)]
+        return [self.subset_by_pdb(part, **kw) for part in parts]
 
     def sanity_check(self):
         rp = self.data
         Npdb = len(self.pdb)
         for ipdb in np.random.choice(Npdb, min(Npdb, 50), replace=False):
             rlb, rub = rp.pdb_res_offsets[ipdb : ipdb + 2]
-            if rlb > 0:
-                assert rp.r_pdbid[rlb - 1] == ipdb - 1
+            # if rlb > 0:
+            # assert rp.r_pdbid[rlb - 1] == ipdb - 1
             assert rp.r_pdbid[rlb] == ipdb
             assert rp.r_pdbid[rub - 1] == ipdb
             if ipdb + 1 < len(rp.pdb):
@@ -197,14 +196,12 @@ class ResPairData:
             plb, pub = rp.pdb_pair_offsets[ipdb : ipdb + 2]
             p_resi = rp.p_resi[plb:pub] - rp.pdb_res_offsets[ipdb]
             p_resj = rp.p_resj[plb:pub] - rp.pdb_res_offsets[ipdb]
-            assert np.min(p_resi) == 0
+            assert np.min(p_resi) >= 0
             assert np.max(p_resi) < rp.nres[ipdb]
             assert 0 < np.min(p_resj) < rp.nres[ipdb]
 
             resi_this_ipdb = rp.p_resi[rp.p_pdbid == ipdb]
             assert np.all(rp.r_pdbid[resi_this_ipdb] == ipdb)
-            if np.min(resi_this_ipdb) - 1 >= 0:
-                assert rp.r_pdbid[np.min(resi_this_ipdb) - 1] != ipdb
 
         assert np.all(rp.p_resi - rp.pdb_res_offsets[rp.p_pdbid] == rp.resno[rp.p_resi])
 
@@ -222,3 +219,25 @@ def _get_pdb_names(files):
     base = [os.path.basename(f) for f in files]
     assert all(b[4:] == "_0001.pdb" for b in base)
     return [b[:4] for b in base]
+
+
+def _update_relational_data(data, prev_pdb_res_offsets, pdb_subset=None):
+    # update relational stuff
+    if pdb_subset is None:
+        pdb_subset = np.arange(len(data.pdbid))
+
+    nold = np.max(data.r_pdbid).values + 1
+    old2new = np.zeros(nold, "i4") - 1
+    old2new[pdb_subset] = np.arange(len(pdb_subset))
+    data.r_pdbid.values = old2new[data.r_pdbid]
+    data.p_pdbid.values = old2new[data.p_pdbid]
+    new_pdb_res_offsets = np.concatenate([[0], np.cumsum(data.nres)])
+    data.attrs["pdb_res_offsets"] = new_pdb_res_offsets
+
+    tmp = np.cumsum(data.p_pdbid.groupby(data.p_pdbid).count())
+    new_pdb_pair_offsets = np.concatenate([[0], tmp])
+    data.attrs["pdb_pair_offsets"] = new_pdb_pair_offsets
+    old_res_ofst = prev_pdb_res_offsets[pdb_subset[data.p_pdbid]]
+    new_res_ofst = new_pdb_res_offsets[data.p_pdbid]
+    data["p_resi"] += new_res_ofst - old_res_ofst
+    data["p_resj"] += new_res_ofst - old_res_ofst
