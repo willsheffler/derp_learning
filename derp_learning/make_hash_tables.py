@@ -92,68 +92,72 @@ def get_bin_info(rp, bintype):
         assert np.all(rp.data[bintype][bin_srange2pairid[lb:ub]] == binid[pairid])
 
 
-def make_seq_prof_xbins(t, v, bintype):
-    prof = np.zeros((len(v.resid), 20))
-    bin_srange, bin_srange2pairid = make_xarray_binner(t, bintype)
+@nb.njit(nogil=True, fastmath=True)
+def pairs_to_seqprof(
+    vbinidx,
+    v_p_resi,
+    tbinidx,
+    p_resi,
+    p_resj,
+    p_etot,
+    aaid,
+    bin_trange,
+    bin_trange2pairid,
+    prof,
+):
+    nmissing, nfound = 0, 0
+    for ivpair in range(len(p_resi)):
+        trange = bin_trange.get(vbinidx[ivpair])
+        if trange < 0:
+            nmissing += 1
+            continue
+        nfound += 1
+        lb = np.right_shift(trange, 32)
+        ub = np.int32(trange)
+        v_resi = v_p_resi[ivpair]
+        for itrange in range(lb, ub):
+            itpair = bin_trange2pairid[itrange]
+            assert tbinidx[itpair] == vbinidx[ivpair]
+            aa = aaid[p_resi[itpair]]
+            prof[v_resi, aa] += 1  # -p_etot[itpair]
 
-    print(bin_srange)
-    print(bin_srange2pairid)
+    return nmissing, nfound
+
+
+def make_seq_prof_xbins(t, v, bintype):
+    prof = np.zeros((len(v.resid), 20), np.float32)
+    bin_trange, bin_trange2pairid = make_numba_binner(t, bintype)
+    nmissing, nfound = pairs_to_seqprof(
+        v[bintype].values,
+        v.p_resi.values,
+        t[bintype].values,
+        t.p_resi.values,
+        t.p_resj.values,
+        t.p_etot.values,
+        t.aaid.values,
+        bin_trange,
+        bin_trange2pairid,
+        prof,
+    )
+    # prof /= np.sum(prof, axis=1)[:, np.newaxis]
+    print(nmissing, nfound, v.aaid[0].values, prof[0])
+    aahat = np.argmax(prof, axis=1)
+    frac = np.sum(aahat == v.aaid.values)
+    print("sequence recovery", frac / len(aahat))
 
 
 def main():
 
-    st = [
-        "fa_atr",
-        "fa_rep",
-        "fa_sol",
-        "fa_intra_atr_xover4",
-        "fa_intra_rep_xover4",
-        "fa_intra_sol_xover4",
-        "lk_ball",
-        "lk_ball_iso",
-        "lk_ball_bridge",
-        "lk_ball_bridge_uncpl",
-        "fa_elec",
-        "fa_intra_elec",
-        "pro_close",
-        "hbond_sr_bb",
-        "hbond_lr_bb",
-        "hbond_bb_sc",
-        "hb_sc",
-        "dslf_fa13",
-        "rama_prepro",
-        "omega",
-        "p_aa_pp",
-        "fa_dun_rot",
-        "fa_dun_dev",
-        "fa_dun_semi",
-        "hxl_tors",
-        "ref",
-    ]
-    mag = [
-        np.mean(np.abs(respairdat["t_" + x].values)) * respairdat.eweights[x]
-        for x in st
-    ]
-    for i in np.argsort(mag):
-        print(st[i], mag[i])
-    import sys
+    # respairdat.sanity_check()
 
-    sys.exit()
+    rp = respairdat
+    # rp = respairdat.subset(100, random=0, sanity_check=True)
+    # binners = {bintype: make_numba_binner(rp, bintype) for bintype in rp.xbin_types}
+    # print(binners)
+    # get_bin_info(rp, "xijbin_2.0_30")
 
-    # vectorized accumulate 1-hot style
-    x = np.array([0])
-    np.add.at(x, np.repeat(0, 5), 1)
-    assert x[0] == 5
-
-    rp = respairdat.subset(10, random=0, sanity_check=True)
-
-    binners = {bintype: make_numba_binner(rp, bintype) for bintype in rp.xbin_types}
-    print(binners)
-
-    get_bin_info(rp, "xijbin_2.0_30")
-
-    # train, valid = rp.split(0.5)
-    # make_seq_prof_xbins(train, valid, "xijbin_2.0_30")
+    train, valid = rp.split(0.5, random=False, sanity_check=True)
+    make_seq_prof_xbins(train, valid, "xijbin_1.0_15")
 
 
 if __name__ == "__main__":

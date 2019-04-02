@@ -135,9 +135,11 @@ class ResPairData:
     def subset(self, keep=None, random=True, sanity_check=False):
         if isinstance(keep, (int, np.int32, np.int64)):
             if random:
-                keep = sorted(np.random.choice(len(self.pdb), keep, replace=False))
+                keep = np.random.choice(len(self.pdb), keep, replace=False)
             else:
                 keep = np.arange(keep)
+        else:
+            keep = np.array(list(keep))
         rp = self.data
         pdbs = rp.pdb[keep].values
         mask = np.isin(rp.pdb, pdbs)
@@ -150,13 +152,15 @@ class ResPairData:
         # update relational stuff
         rpsub.r_pdbid.values = old2new[rpsub.r_pdbid]
         rpsub.p_pdbid.values = old2new[rpsub.p_pdbid]
-        rpsub.attrs["pdb_res_offsets"] = np.concatenate([[0], np.cumsum(rpsub.nres)])
+        new_pdb_res_offsets = np.concatenate([[0], np.cumsum(rpsub.nres)])
+        rpsub.attrs["pdb_res_offsets"] = new_pdb_res_offsets
         tmp = np.cumsum(rpsub.p_pdbid.groupby(rpsub.p_pdbid).count())
-        rpsub.attrs["pdb_pair_offsets"] = np.concatenate([[0], tmp])
-        old_res_ofst = rp.pdb_res_offsets[rpsub.p_pdbid]
-        new_res_ofst = rpsub.pdb_res_offsets[rpsub.p_pdbid]
-        rpsub["p_resi"] += new_res_ofst - new_res_ofst
-        rpsub["p_resj"] += new_res_ofst - new_res_ofst
+        new_pdb_pair_offsets = np.concatenate([[0], tmp])
+        rpsub.attrs["pdb_pair_offsets"] = new_pdb_pair_offsets
+        old_res_ofst = rp.pdb_res_offsets[keep[rpsub.p_pdbid]]
+        new_res_ofst = new_pdb_res_offsets[rpsub.p_pdbid]
+        rpsub["p_resi"] += new_res_ofst - old_res_ofst
+        rpsub["p_resj"] += new_res_ofst - old_res_ofst
 
         rp = ResPairData(rpsub)
         if sanity_check:
@@ -170,13 +174,16 @@ class ResPairData:
             part1 = np.random.choice(len(self.pdb), n1, replace=False)
             part2 = np.array(list(set(range(len(self.pdb))) - set(part1)))
             np.random.shuffle(part2)
+        else:
+            part1 = np.arange(n1)
+            part2 = np.arange(n1, len(self.pdb))
         parts = [part1, part2]
         return [self.subset(part, **kw) for part in parts]
 
     def sanity_check(self):
         rp = self.data
         Npdb = len(self.pdb)
-        for ipdb in np.random.choice(Npdb, min(Npdb, 100), replace=False):
+        for ipdb in np.random.choice(Npdb, min(Npdb, 50), replace=False):
             rlb, rub = rp.pdb_res_offsets[ipdb : ipdb + 2]
             if rlb > 0:
                 assert rp.r_pdbid[rlb - 1] == ipdb - 1
@@ -194,6 +201,11 @@ class ResPairData:
             assert np.max(p_resi) < rp.nres[ipdb]
             assert 0 < np.min(p_resj) < rp.nres[ipdb]
 
+            resi_this_ipdb = rp.p_resi[rp.p_pdbid == ipdb]
+            assert np.all(rp.r_pdbid[resi_this_ipdb] == ipdb)
+            if np.min(resi_this_ipdb) - 1 >= 0:
+                assert rp.r_pdbid[np.min(resi_this_ipdb) - 1] != ipdb
+
         assert np.all(rp.p_resi - rp.pdb_res_offsets[rp.p_pdbid] == rp.resno[rp.p_resi])
 
         # sanity check pair distances vs res-res distances
@@ -201,6 +213,9 @@ class ResPairData:
         cbj = rp.cb[rp.p_resj]
         dhat = np.linalg.norm(cbi - cbj, axis=1)
         assert np.allclose(dhat, rp.p_dist, atol=1e-3)
+
+        assert np.max(rp.p_resi) < len(rp.resid)
+        assert np.max(rp.p_resj) < len(rp.resid)
 
 
 def _get_pdb_names(files):
