@@ -202,7 +202,10 @@ def run_seq_prof_test(N, ijob, min_ssep=0):
     # np.random.seed(ijob)
 
     # rp = respairdat
+    pc = time.perf_counter()
     rp = respairdat.subset_by_pdb(N, random=1, sanity_check=1)
+    print("time subset", time.perf_counter() - pc)
+
     # binners = {bintype: make_numba_binner(rp, bintype) for bintype in rp.xbin_types}
     # print(binners)
     # get_bin_info(rp, "xijbin_2.0_30")
@@ -210,8 +213,11 @@ def run_seq_prof_test(N, ijob, min_ssep=0):
     pc = time.perf_counter()
     ssep = rp.p_resj - rp.p_resi
     rp = rp.subset_by_pair(ssep >= min_ssep)
+    print("time subset_pair", time.perf_counter() - pc)
+
+    pc = time.perf_counter()
     train, valid = rp.split_by_pdb(0.75, random=True, sanity_check=True)
-    print("tsplit", time.perf_counter() - pc)
+    print("time split", time.perf_counter() - pc)
 
     pc = time.perf_counter()
     bintype = ["xijbin_1.0_15", "xjibin_1.0_15"]
@@ -220,10 +226,29 @@ def run_seq_prof_test(N, ijob, min_ssep=0):
     return make_seq_prof_xbins(train, valid, bintype, pc)
 
 
+def find_subset_error(i):
+    try:
+        print(i)
+        seed = np.random.randint(2 ** 32)
+        np.random.seed(seed)
+        stage = "subset_by_pdb"
+        rp = respairdat.subset_by_pdb(10, random=1, sanity_check=1)
+        stage = "subset_by_pair"
+        rp = rp.subset_by_pair(rp.p_resj - rp.p_resi >= 9, sanity_check=1)
+        stage = "split"
+        train, valid = rp.split_by_pdb(0.5, random=1, sanity_check=1)
+    except:
+        print("FAIL", stage, "seed:", seed)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--parallel", default=-1, type=int)
     args = parser.parse_args(sys.argv[1:])
+
+    with get_process_executor(args.parallel) as pool:
+        pool.map(find_subset_error, range(100))
+    return
 
     # np.random.seed(3094865702)
 

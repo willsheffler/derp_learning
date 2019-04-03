@@ -132,28 +132,37 @@ class ResPairData:
         dat["ss2id"] = xr.DataArray(ss2id, [id2ss], ["ss"])
         self.data = dat
 
-    def subset_by_pdb(self, keep=None, random=True, sanity_check=False):
-        """keep subset of data in same order as original"""
+    def _get_keepers_by_pdb(self, keep, random=True, seed=None, **kw):
         if isinstance(keep, (int, np.int32, np.int64)):
             if random:
+                if seed is not None:
+                    np.random.seed(seed)
                 keep = np.random.choice(len(self.pdb), keep, replace=False)
             else:
                 keep = np.arange(keep)
-        keep = np.array(sorted(keep))
+        return np.array(sorted(keep))
 
-        residx = np.isin(self.data.r_pdbid, keep)
-        pairidx = np.isin(self.data.p_pdbid, keep)
-        rpsub = self.data.sel(pdbid=keep, resid=residx, pairid=pairidx)
+    def subset_by_pdb(self, keep, sanity_check=False, **kw):
+        """keep subset of data in same order as original"""
 
-        _update_relational_data(rpsub, self.data.pdb_res_offsets, keep)
+        keepers = self._get_keepers_by_pdb(keep, **kw)
+        residx = np.isin(self.data.r_pdbid, keepers)
+        pairidx = np.isin(self.data.p_pdbid, keepers)
+        rpsub = self.data.sel(pdbid=keepers, resid=residx, pairid=pairidx)
+
+        _update_relational_data(rpsub, self.data.pdb_res_offsets, keepers)
 
         new = ResPairData(rpsub)
         if sanity_check:
+            # try:
             new.sanity_check()
+        # except AssertionError:
+        # import _pickle
+        # with open('subset_by_pdb_error')
         return new
 
-    def subset_by_pair(self, keep, sanity_check=False):
-        rpsub = self.data.sel(pairid=keep)
+    def subset_by_pair(self, keepers, sanity_check=False):
+        rpsub = self.data.sel(pairid=keepers)
 
         tmp = np.cumsum(rpsub.p_pdbid.groupby(rpsub.p_pdbid).count())
         new_pdb_pair_offsets = np.concatenate([[0], tmp])
