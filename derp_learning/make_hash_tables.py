@@ -14,8 +14,13 @@ from derp_learning.khash import KHashi8i8
 
 
 def load_which_takes_forever():
-    with open("datafiles/pdb_res_pair_data.pickle", "rb") as inp:
-        return _pickle.load(inp)
+    print("loading huge dataset")
+    t = time.perf_counter()
+    with open("datafiles/pdb_res_pair_data_reduced_si30.pickle", "rb") as inp:
+        rp = _pickle.load(inp)
+    rp.sanity_check()
+    print("load huge dataset time", time.perf_counter() - t)
+    return rp
 
 
 if hasattr(os, "a_very_unique_name"):
@@ -135,7 +140,7 @@ def pairs_to_seqprof(
     return nmissing, nfound
 
 
-def make_seq_prof_xbins(t, v, bintypes, pc):
+def make_seq_prof_xbins(t, v, bintypes, pc, min_ssep):
     prof = np.zeros((len(v.resid), 20), np.float32)
 
     for bintype in bintypes:
@@ -188,42 +193,51 @@ def make_seq_prof_xbins(t, v, bintypes, pc):
     sr4 = frac4 / len(aahat4)
     # print("norm recovery    ", frac4 / len(aahat4))
 
+    srnb = [
+        np.sum(aahat1[v.nnb10 >= t] == v.aaid[v.nnb10 >= t]) / np.sum(v.nnb10 >= t)
+        for t in [14, 19, 24]
+    ]
+
     pc = time.perf_counter() - pc
     print(
         f"frac found {frac_found:1.5f} seq recov",
-        f"{sr1:1.5f} {sr2:1.5f} {sr3:1.5f} {sr4:1.5f} time {pc:8.3f}",
+        f"{sr1:1.5f} {sr2:1.5f} {sr3:1.5f} {sr4:1.5f} time {pc:8.3f} {len(t.pdb):6} {min_ssep:3}",
     )
-    return sr1
+    return [sr1, frac_found] + srnb
 
 
 def run_seq_prof_test(N, ijob, min_ssep=0):
 
     np.random.seed(np.random.randint(2 ** 24) + ijob)
-    # np.random.seed(ijob)
 
-    # rp = respairdat
-    pc = time.perf_counter()
-    rp = respairdat.subset_by_pdb(N, random=1, sanity_check=1)
-    print("time subset", time.perf_counter() - pc)
+    # pc = time.perf_counter()
+    if N >= len(respairdat.pdb):
+        rp = respairdat
+    else:
+        rp = respairdat.subset_by_pdb(N, random=1, sanity_check=1)
+    # print("time subset", time.perf_counter() - pc)
 
     # binners = {bintype: make_numba_binner(rp, bintype) for bintype in rp.xbin_types}
     # print(binners)
     # get_bin_info(rp, "xijbin_2.0_30")
 
-    pc = time.perf_counter()
+    # pc = time.perf_counter()
     ssep = rp.p_resj - rp.p_resi
-    rp = rp.subset_by_pair(ssep >= min_ssep)
-    print("time subset_pair", time.perf_counter() - pc)
+    rp2 = rp.subset_by_pair(ssep >= min_ssep, sanity_check=1)
+    # print("time subset_pair", time.perf_counter() - pc, "del rp")
 
-    pc = time.perf_counter()
-    train, valid = rp.split_by_pdb(0.75, random=True, sanity_check=True)
-    print("time split", time.perf_counter() - pc)
+    # pc = time.perf_counter()
+    train, valid = rp2.split_by_pdb(0.75, random=1, sanity_check=1)
+    # print("time split", time.perf_counter() - pc, "del rp2")
 
     pc = time.perf_counter()
     bintype = ["xijbin_1.0_15", "xjibin_1.0_15"]
     # bintype = ["xijbin_1.0_15"]
     # bintype = ["xjibin_1.0_15"]
-    return make_seq_prof_xbins(train, valid, bintype, pc)
+
+    out = make_seq_prof_xbins(train, valid, bintype, pc, min_ssep)
+
+    return out
 
 
 def find_subset_error(i):
@@ -246,20 +260,22 @@ def main():
     parser.add_argument("--parallel", default=-1, type=int)
     args = parser.parse_args(sys.argv[1:])
 
-    with get_process_executor(args.parallel) as pool:
-        pool.map(find_subset_error, range(100))
-    return
+    # with get_process_executor(args.parallel) as pool:
+    # pool.map(find_subset_error, range(1000000))
+    # return
 
     # np.random.seed(3094865702)
 
     # respairdat.sanity_check()
 
-    nsamp = 8
-    sizes = [len(respairdat.pdb)]
-    # sizes = [100, 330, 100, len(respairdat.pdb)]
-    seq_seps = [7, 8, 9, 10, 11, 12, 13]
+    nsamp = 28
+    # sizes = [len(respairdat.pdb)]
+    sizes = [3300]
+    seq_seps = [1, 4, 9, 16]
 
-    results = list()
+    srecov = list()
+    ffound = list()
+    srnb = list()
     rtime = list()
     rsize = list()
     rssep = list()
@@ -269,20 +285,25 @@ def main():
 
         for N in sizes:
             for ssep in seq_seps:
+                print("start", N, ssep)
                 ttmp = time.perf_counter()
                 rsize.append(N)
                 rssep.append(ssep)
                 futures = list()
                 for i in range(nsamp):
                     futures.append(pool.submit(run_seq_prof_test, N, i, ssep))
-                result = [np.array(f.result()) for f in futures]
-                results.append(np.mean(result))
+                result = np.stack([f.result() for f in futures])
+                srecov.append(np.mean(result[:, 0], axis=0))
+                ffound.append(np.mean(result[:, 1], axis=0))
+                srnb.append(np.mean(result[:, 2:], axis=0))
                 rtime.append(time.perf_counter() - ttmp)
 
-    print("avg seq recov", np.mean(result), "time", time.perf_counter() - t)
-
-    for i, sr in enumerate(results):
-        print(f"mean seq recov {rsize[i]:6} {rssep[i]:3} {sr:1.5f} {rtime[i]:6.1f}")
+    for i, sr in enumerate(srecov):
+        print(
+            f"result ntot: {rsize[i]:6} ssep: {rssep[i]:3}",
+            f"seqrecov: {sr:1.4f} ffound: {ffound[i]:1.4f} time: {rtime[i]:6.1f}",
+            f"nb13 {srnb[i][0]:1.4f} nb18 {srnb[i][1]:1.4f} nb23 {srnb[i][2]:1.4f} ",
+        )
 
 
 if __name__ == "__main__":
@@ -294,3 +315,25 @@ if __name__ == "__main__":
 # mean seq recov 330 0.16608294672397578
 # mean seq recov 1000 0.1753792602071716
 # mean seq recov 2713 0.17891613973143483
+
+
+# SI30 mean seq recov    100   1 0.14889   25.4
+# SI30 mean seq recov   1000   1 0.15491  296.1
+# SI30 mean seq recov  10000   1 0.15829 43035.0
+
+# SI30 mean seq recov    100   1 0.15219   24.4
+# SI30 mean seq recov    100   4 0.11992   18.2
+# SI30 mean seq recov    100   8 0.10110   17.9
+
+# result ntot:    100 ssep:   1 seqrecov: 0.1548 ffound: 0.3696 time:   29.2 nb13 0.1586 nb18 0.1692 nb23 0.1849
+# result ntot:    100 ssep:   4 seqrecov: 0.1186 ffound: 0.1831 time:   19.7 nb13 0.1257 nb18 0.1396 nb23 0.1584
+# result ntot:    100 ssep:   9 seqrecov: 0.0980 ffound: 0.0886 time:   19.5 nb13 0.1053 nb18 0.1210 nb23 0.1451
+# result ntot:    100 ssep:  16 seqrecov: 0.0945 ffound: 0.0735 time:   19.4 nb13 0.1014 nb18 0.1170 nb23 0.1431
+# result ntot:    330 ssep:   1 seqrecov: 0.1572 ffound: 0.4316 time:   34.2 nb13 0.1608 nb18 0.1719 nb23 0.1903
+# result ntot:    330 ssep:   4 seqrecov: 0.1319 ffound: 0.2402 time:   18.2 nb13 0.1392 nb18 0.1531 nb23 0.1703
+# result ntot:    330 ssep:   9 seqrecov: 0.1069 ffound: 0.1348 time:   16.9 nb13 0.1168 nb18 0.1335 nb23 0.1559
+# result ntot:    330 ssep:  16 seqrecov: 0.1052 ffound: 0.1191 time:   16.9 nb13 0.1145 nb18 0.1311 nb23 0.1541
+# result ntot:   1000 ssep:   1 seqrecov: 0.1566 ffound: 0.4995 time:  293.7 nb13 0.1607 nb18 0.1723 nb23 0.1899
+# result ntot:   1000 ssep:   4 seqrecov: 0.1443 ffound: 0.3214 time:   50.6 nb13 0.1524 nb18 0.1667 nb23 0.1841
+# result ntot:   1000 ssep:   9 seqrecov: 0.1211 ffound: 0.2091 time:   23.9 nb13 0.1324 nb18 0.1504 nb23 0.1723
+# result ntot:   1000 ssep:  16 seqrecov: 0.1132 ffound: 0.1865 time:   23.5 nb13 0.1238 nb18 0.1410 nb23 0.1634
