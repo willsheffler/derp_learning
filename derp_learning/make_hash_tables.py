@@ -134,8 +134,8 @@ def pairs_to_seqprof(
             assert tbinidx[itpair] == binid
             aai = aaid[p_resi[itpair]]
             aaj = aaid[p_resj[itpair]]
-            prof[v_resi, aai] += 1.0
-            prof[v_resj, aaj] += 1.0
+            prof[v_resi, aai] += 1
+            prof[v_resj, aaj] += 1
 
     return nmissing, nfound
 
@@ -167,8 +167,14 @@ def make_seq_prof_xbins(t, v, bintypes, pc, min_ssep):
     h_aafreq /= np.sum(h_aafreq)
     bias = h_aafreq / v_aafreq
 
-    frac_found = nfound / len(v.p_resi)
+    notmissing = np.sum(prof, axis=1) > 10
+    aahatm = np.argmax(prof[notmissing], axis=1)
+    fracm = np.sum(aahatm == v.aaid.values[notmissing])
+    srm = fracm / np.sum(notmissing)
+
+    pfound = nfound / len(v.p_resi)
     # print(nmissing, nfound, v.aaid[0].values, prof[0])
+    rfound = np.sum(notmissing) / len(notmissing)
 
     aahat1 = np.argmax(prof, axis=1)
     frac1 = np.sum(aahat1 == v.aaid.values)
@@ -200,10 +206,13 @@ def make_seq_prof_xbins(t, v, bintypes, pc, min_ssep):
 
     pc = time.perf_counter() - pc
     print(
-        f"frac found {frac_found:1.5f} seq recov",
-        f"{sr1:1.5f} {sr2:1.5f} {sr3:1.5f} {sr4:1.5f} time {pc:8.3f} {len(t.pdb):6} {min_ssep:3}",
+        f"frac found {rfound:1.4f} {pfound:1.4f} seq recov",
+        f"{sr1:1.5f} {sr2:1.5f} {sr3:1.5f} {sr4:1.5f}",
+        f" time {pc:8.3f} {len(t.pdb):6} {min_ssep:3}",
+        f"{srm:1.4f}",
     )
-    return [sr1, frac_found] + srnb
+
+    return [sr1, pfound, rfound, srm] + srnb
 
 
 def run_seq_prof_test(N, ijob, min_ssep=0):
@@ -227,11 +236,19 @@ def run_seq_prof_test(N, ijob, min_ssep=0):
     # print("time subset_pair", time.perf_counter() - pc, "del rp")
 
     # pc = time.perf_counter()
-    train, valid = rp2.split_by_pdb(0.75, random=1, sanity_check=1)
+    train, valid = rp2.split_by_pdb(0.9, random=1, sanity_check=1)
     # print("time split", time.perf_counter() - pc, "del rp2")
 
     pc = time.perf_counter()
     bintype = ["xijbin_1.0_15", "xjibin_1.0_15"]
+    bintype = [
+        # "xijbin_0.5_7.5",
+        # "xjibin_0.5_7.5",
+        "xijbin_1.0_15",
+        "xjibin_1.0_15",
+        # "xijbin_2.0_30",
+        # "xjibin_2.0_30",
+    ]
     # bintype = ["xijbin_1.0_15"]
     # bintype = ["xjibin_1.0_15"]
 
@@ -268,14 +285,16 @@ def main():
 
     # respairdat.sanity_check()
 
-    nsamp = 28
+    nsamp = 8
     # sizes = [len(respairdat.pdb)]
-    sizes = [3300]
-    seq_seps = [1, 4, 9, 16]
+    sizes = [100, 316, 1000, 3162, len(respairdat.pdb)]
+    seq_seps = [1, 9]
 
     srecov = list()
-    ffound = list()
+    pfound = list()
+    rfound = list()
     srnb = list()
+    srm = list()
     rtime = list()
     rsize = list()
     rssep = list()
@@ -294,15 +313,18 @@ def main():
                     futures.append(pool.submit(run_seq_prof_test, N, i, ssep))
                 result = np.stack([f.result() for f in futures])
                 srecov.append(np.mean(result[:, 0], axis=0))
-                ffound.append(np.mean(result[:, 1], axis=0))
-                srnb.append(np.mean(result[:, 2:], axis=0))
+                pfound.append(np.mean(result[:, 1], axis=0))
+                rfound.append(np.mean(result[:, 2], axis=0))
+                srm.append(np.mean(result[:, 3], axis=0))
+                srnb.append(np.mean(result[:, 4:], axis=0))
                 rtime.append(time.perf_counter() - ttmp)
 
     for i, sr in enumerate(srecov):
         print(
-            f"result ntot: {rsize[i]:6} ssep: {rssep[i]:3}",
-            f"seqrecov: {sr:1.4f} ffound: {ffound[i]:1.4f} time: {rtime[i]:6.1f}",
-            f"nb13 {srnb[i][0]:1.4f} nb18 {srnb[i][1]:1.4f} nb23 {srnb[i][2]:1.4f} ",
+            f"ntot: {rsize[i]:6} ssep: {rssep[i]:3}",
+            f"sr: {sr:1.4f} rf10: {rfound[i]:1.4f} pf: {pfound[i]:1.4f} time: {rtime[i]:6.1f}",
+            f"nb13 {srnb[i][0]:1.4f} nb18 {srnb[i][1]:1.4f} nb23 {srnb[i][2]:1.4f}",
+            f"m10 {srm[i]:1.4f}",
         )
 
 
@@ -325,15 +347,26 @@ if __name__ == "__main__":
 # SI30 mean seq recov    100   4 0.11992   18.2
 # SI30 mean seq recov    100   8 0.10110   17.9
 
-# result ntot:    100 ssep:   1 seqrecov: 0.1548 ffound: 0.3696 time:   29.2 nb13 0.1586 nb18 0.1692 nb23 0.1849
-# result ntot:    100 ssep:   4 seqrecov: 0.1186 ffound: 0.1831 time:   19.7 nb13 0.1257 nb18 0.1396 nb23 0.1584
-# result ntot:    100 ssep:   9 seqrecov: 0.0980 ffound: 0.0886 time:   19.5 nb13 0.1053 nb18 0.1210 nb23 0.1451
-# result ntot:    100 ssep:  16 seqrecov: 0.0945 ffound: 0.0735 time:   19.4 nb13 0.1014 nb18 0.1170 nb23 0.1431
-# result ntot:    330 ssep:   1 seqrecov: 0.1572 ffound: 0.4316 time:   34.2 nb13 0.1608 nb18 0.1719 nb23 0.1903
-# result ntot:    330 ssep:   4 seqrecov: 0.1319 ffound: 0.2402 time:   18.2 nb13 0.1392 nb18 0.1531 nb23 0.1703
-# result ntot:    330 ssep:   9 seqrecov: 0.1069 ffound: 0.1348 time:   16.9 nb13 0.1168 nb18 0.1335 nb23 0.1559
-# result ntot:    330 ssep:  16 seqrecov: 0.1052 ffound: 0.1191 time:   16.9 nb13 0.1145 nb18 0.1311 nb23 0.1541
-# result ntot:   1000 ssep:   1 seqrecov: 0.1566 ffound: 0.4995 time:  293.7 nb13 0.1607 nb18 0.1723 nb23 0.1899
-# result ntot:   1000 ssep:   4 seqrecov: 0.1443 ffound: 0.3214 time:   50.6 nb13 0.1524 nb18 0.1667 nb23 0.1841
-# result ntot:   1000 ssep:   9 seqrecov: 0.1211 ffound: 0.2091 time:   23.9 nb13 0.1324 nb18 0.1504 nb23 0.1723
-# result ntot:   1000 ssep:  16 seqrecov: 0.1132 ffound: 0.1865 time:   23.5 nb13 0.1238 nb18 0.1410 nb23 0.1634
+# result ntot:    100 ssep:   1 seqrecov: 0.1548 pfound: 0.3696 time:   29.2 nb13 0.1586 nb18 0.1692 nb23 0.1849
+# result ntot:    100 ssep:   4 seqrecov: 0.1186 pfound: 0.1831 time:   19.7 nb13 0.1257 nb18 0.1396 nb23 0.1584
+# result ntot:    100 ssep:   9 seqrecov: 0.0980 pfound: 0.0886 time:   19.5 nb13 0.1053 nb18 0.1210 nb23 0.1451
+# result ntot:    100 ssep:  16 seqrecov: 0.0945 pfound: 0.0735 time:   19.4 nb13 0.1014 nb18 0.1170 nb23 0.1431
+# result ntot:    330 ssep:   1 seqrecov: 0.1572 pfound: 0.4316 time:   34.2 nb13 0.1608 nb18 0.1719 nb23 0.1903
+# result ntot:    330 ssep:   4 seqrecov: 0.1319 pfound: 0.2402 time:   18.2 nb13 0.1392 nb18 0.1531 nb23 0.1703
+# result ntot:    330 ssep:   9 seqrecov: 0.1069 pfound: 0.1348 time:   16.9 nb13 0.1168 nb18 0.1335 nb23 0.1559
+# result ntot:    330 ssep:  16 seqrecov: 0.1052 pfound: 0.1191 time:   16.9 nb13 0.1145 nb18 0.1311 nb23 0.1541
+# result ntot:   1000 ssep:   1 seqrecov: 0.1566 pfound: 0.4995 time:  293.7 nb13 0.1607 nb18 0.1723 nb23 0.1899
+# result ntot:   1000 ssep:   4 seqrecov: 0.1443 pfound: 0.3214 time:   50.6 nb13 0.1524 nb18 0.1667 nb23 0.1841
+# result ntot:   1000 ssep:   9 seqrecov: 0.1211 pfound: 0.2091 time:   23.9 nb13 0.1324 nb18 0.1504 nb23 0.1723
+# result ntot:   1000 ssep:  16 seqrecov: 0.1132 pfound: 0.1865 time:   23.5 nb13 0.1238 nb18 0.1410 nb23 0.1634
+
+# ntot:    100 ssep:   1 sr: 0.1554 rf10: 0.7570 pf: 0.3828 time:   20.8 nb13 0.1585 nb18 0.1667 nb23 0.1847 m10 0.1778
+# ntot:    100 ssep:   9 sr: 0.0983 rf10: 0.1392 pf: 0.1088 time:   18.9 nb13 0.1073 nb18 0.1274 nb23 0.1541 m10 0.1528
+# ntot:    316 ssep:   1 sr: 0.1564 rf10: 0.6988 pf: 0.4406 time:   26.7 nb13 0.1594 nb18 0.1699 nb23 0.1912 m10 0.1870
+# ntot:    316 ssep:   9 sr: 0.1109 rf10: 0.1634 pf: 0.1435 time:   15.9 nb13 0.1219 nb18 0.1398 nb23 0.1670 m10 0.1825
+# ntot:   1000 ssep:   1 sr: 0.1573 rf10: 0.7439 pf: 0.5141 time:  151.6 nb13 0.1612 nb18 0.1715 nb23 0.1878 m10 0.1821
+# ntot:   1000 ssep:   9 sr: 0.1211 rf10: 0.2119 pf: 0.2295 time:   24.6 nb13 0.1325 nb18 0.1506 nb23 0.1736 m10 0.1983
+# ntot:   3162 ssep:   1 sr: 0.1567 rf10: 0.7231 pf: 0.6179 time: 1430.6 nb13 0.1613 nb18 0.1734 nb23 0.1909 m10 0.1834
+# ntot:   3162 ssep:   9 sr: 0.1414 rf10: 0.3452 pf: 0.3746 time:   54.4 nb13 0.1565 nb18 0.1782 nb23 0.2046 m10 0.2226
+# ntot:  16794 ssep:   1 sr: 0.1587 rf10: 0.7366 pf: 0.8229 time: 39839.3 nb13 0.1629 nb18 0.1746 nb23 0.1920 m10 0.1832
+# ntot:  16794 ssep:   9 sr: 0.1779 rf10: 0.6055 pf: 0.6871 time:  332.4 nb13 0.1985 nb18 0.2237 nb23 0.2488 m10 0.2333
