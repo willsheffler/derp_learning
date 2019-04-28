@@ -118,7 +118,7 @@ def pdbdata(pose, fname):
 
     # print(fname, "compute sasa")
     sasa_probe_vals = np.array([2, 3, 4])
-    sasa = polya_sasa(pose, sasa_probe_vals)
+    sasa, alapose = polya_sasa(pose, sasa_probe_vals)
     assert len(pose) == sasa.shape[0]
     assert sasa.shape[1] == len(sasa_probe_vals)
     for i, v in enumerate(sasa_probe_vals):
@@ -173,9 +173,10 @@ def extract_hbond_terms(pose, fname, **kw):
     return {k: v for k, v in zip(labels, result)}
 
 
-def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
+def extract_pair_terms(pose, alapose, sym_chain_follows, chains, fname, **kw):
     eweights = pose.energies().weights()
     energy_graph = pose.energies().energy_graph()
+    energy_graph_ala = alapose.energies().energy_graph()
     hbonds = extract_hbond_terms(pose, fname)
 
     # print(fname, "extract pair energies")
@@ -193,10 +194,12 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
             for jr in range(ir + 1, len(pose)):
                 assert ir < jr
                 edge = energy_graph.find_edge(ir + 1, jr + 1)
+                alaedge = energy_graph_ala.find_edge(ir + 1, jr + 1)
                 if not edge:
                     continue
                 etot = edge.dot(eweights)
-                if etot == 0.0:
+                etot -= alaedge.dot(eweights) if alaedge else 0
+                if etot >= 0:
                     continue
                 pairterms["p_resi"].append(ir)
                 pairterms["p_resj"].append(jr)
@@ -207,6 +210,7 @@ def extract_pair_terms(pose, sym_chain_follows, chains, fname, **kw):
                     pairterms["p_" + lbl].append(h)
                 for lbl, st in score_types.items():
                     pairterms["p_" + lbl].append(edge[st])
+                    pairterms["p_" + lbl][-1] -= alaedge[st] if alaedge else 0
     for k in pairterms:
         pairterms[k] = np.array(pairterms[k], "f4")
     for v in pairterms.values():
@@ -219,7 +223,7 @@ def polya_sasa(pose, sasa_probe_vals):
         M = pyrosetta.rosetta.protocols.simple_moves.MakePolyXMover
     except:
         M = pyrosetta.rosetta.protocols.pose_creation.MakePolyXMover
-    m = M("ALA", keep_pro=False, keep_gly=True, keep_disulfide_cys=True)
+    m = M("ALA", keep_pro=True, keep_gly=True, keep_disulfide_cys=True)
     polya_pose = pose.clone()
     m.apply(polya_pose)
     sasacalc = pyrosetta.rosetta.core.scoring.sasa.SasaCalc()
@@ -238,7 +242,7 @@ def polya_sasa(pose, sasa_probe_vals):
         # np.sum(rsdsasa[:, i] == 0),
         # )
 
-    return rsdsasa
+    return rsdsasa, polya_pose
 
 
 def get_bb_stubs(pose, which_resi=None):
