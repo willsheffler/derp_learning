@@ -46,8 +46,8 @@ score_types = {
     "fa_elec": pyrosetta.rosetta.core.scoring.ScoreType.fa_elec,
     #    # "fa_intra_elec": pyrosetta.rosetta.core.scoring.ScoreType.fa_intra_elec,
     #    # "pro_close": pyrosetta.rosetta.core.scoring.ScoreType.pro_close,
-    "hbond_sr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sr_bb,
-    "hbond_lr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_lr_bb,
+    # "hbond_sr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sr_bb,
+    # "hbond_lr_bb": pyrosetta.rosetta.core.scoring.ScoreType.hbond_lr_bb,
     # "hbond_bb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_bb_sc,
     # "hb_sc": pyrosetta.rosetta.core.scoring.ScoreType.hbond_sc,
     #    # "dslf_fa13": pyrosetta.rosetta.core.scoring.ScoreType.dslf_fa13,
@@ -82,13 +82,14 @@ def pdbdata(pose, fname):
     # coords, etc
 
     ncac = get_bb_coords(pose)
-    stubs = ncac_to_stubs(ncac).astype("f4")
+    # stubs = ncac_to_stubs(ncac).astype("f4")
     ncac = ncac
     cb = get_coords(pose, "CB")
     o = get_coords(pose, "O")
     com = np.mean(cb, axis=0)
     rg = np.sqrt(np.sum((cb - com) ** 2) / len(cb))
-    coords = dict(ncac=ncac, cb=cb, o=o, stubs=stubs, com=com, rg=rg)
+    coords = dict(ncac=ncac, cb=cb, o=o, com=com, rg=rg)
+    # coords = dict(ncac=ncac, cb=cb, o=o, stubs=stubs, com=com, rg=rg)
     chains = get_chain_bounds(pose)
 
     # one-body stuff

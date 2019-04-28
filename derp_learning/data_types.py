@@ -26,13 +26,13 @@ class ResPairData:
         pairdata = raw["pairdata"]
         pdb_res_offsets = raw["pdb_res_offsets"]
         pdb_pair_offsets = raw["pdb_pair_offsets"]
-        bin_params = raw["bin_params"]
+        # bin_params = raw["bin_params"]
 
         # put this stuff in dataset
 
         self.res_ofst = pdb_res_offsets
         self.pair_ofst = pdb_pair_offsets
-        self.bin_params = bin_params
+        # self.bin_params = bin_params
 
         pdbdata["file"] = pdbdata["pdb"]
         pdbdata["pdb"] = _get_pdb_names(pdbdata["file"])
@@ -50,7 +50,7 @@ class ResPairData:
         resdata["c"] = (["resid", "xyzw"], coords["c"])
         resdata["o"] = (["resid", "xyzw"], coords["o"])
         resdata["cb"] = (["resid", "xyzw"], coords["cb"])
-        resdata["stub"] = (["resid", "hrow", "hcol"], coords["stubs"])
+        # resdata["stub"] = (["resid", "hrow", "hcol"], coords["stubs"])
         resdata["r_pdbid"] = resdata["pdbno"]
         del resdata["pdbno"]
 
@@ -81,9 +81,9 @@ class ResPairData:
             attrs=dict(
                 pdb_res_offsets=pdb_res_offsets,
                 pdb_pair_offsets=pdb_pair_offsets,
-                xbin_params=bin_params,
-                xbin_types=raw["xbin_types"],
-                xbin_swap_type=raw["xbin_swap_type"],
+                # xbin_params=bin_params,
+                # xbin_types=raw["xbin_types"],
+                # xbin_swap_type=raw["xbin_swap_type"],
                 eweights=raw["eweights"],
             ),
         )
@@ -94,7 +94,7 @@ class ResPairData:
         self.data["p_resi"] += res_ofst
         self.data["p_resj"] += res_ofst
 
-        assert self.data.stub.sel(hcol="t").shape[1] == 4
+        # assert self.data.stub.sel(hcol="t").shape[1] == 4
         assert np.all(self.data.ca.sel(xyzw="w") == 1)
         assert np.all(self.data.cb.sel(xyzw="w") == 1)
 

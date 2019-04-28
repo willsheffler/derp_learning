@@ -46,8 +46,9 @@ def process_pdb_data(fnames, parallel):
     c = np.concatenate([x["coords"]["ncac"][:, 2] for x in raw])
     cb = np.concatenate([x["coords"]["cb"] for x in raw])
     o = np.concatenate([x["coords"]["o"] for x in raw])
-    stubs = np.concatenate([x["coords"]["stubs"] for x in raw])
-    coords = dict(n=n, ca=ca, c=c, o=o, cb=cb, stubs=stubs)
+    # stubs = np.concatenate([x["coords"]["stubs"] for x in raw])
+    # coords = dict(n=n, ca=ca, c=c, o=o, cb=cb, stubs=stubs)
+    coords = dict(n=n, ca=ca, c=c, o=o, cb=cb)
 
     resdata = dict()
     resdata["pdbno"] = [np.repeat(i, len(x["coords"]["cb"])) for i, x in enumerate(raw)]
@@ -119,7 +120,7 @@ def _compute_nnb(res_cb, nbdists):
     for nbdist in nbdists:
         lbl = "nnb" + str(nbdist)
         nnb.append(np.sum(p_dist <= nbdist, axis=1) - 1)
-    return nnb
+    return np.array(nnb, "i4")
 
 
 def compute_neighbor_stats(pdb, resdata, cb, nbdists, pdb_res_offsets, parallel, **kw):
@@ -131,7 +132,7 @@ def compute_neighbor_stats(pdb, resdata, cb, nbdists, pdb_res_offsets, parallel,
             res_cb = cb[lb:ub]
             futures.append(pool.submit(_compute_nnb, res_cb, nbdists))
             # foo
-        result = np.concatenate([np.array(f.result()).T for f in futures])
+        result = np.concatenate([f.result().T for f in futures])
 
     for i, nbdist in enumerate(nbdists):
         lbl = "nnb" + str(nbdist)
@@ -158,17 +159,19 @@ def sanity_check_pair_res_relation(pdb, nres, pdb_pair_offsets, pairdata, **kw):
                 if i < 100:
                     residx = pairdata[tmp][pdbi]
                     assert max(residx) < nres[i]
-                    assert min(residx) == 0 or tmp == "p_resj"
+                    assert min(residx) >= 0
                 lb, ub = pdb_pair_offsets[i : i + 2]
                 residx = pairdata[tmp][lb:ub]
                 assert max(residx) < nres[i]
-                assert min(residx) == 0 or tmp == "p_resj"
+                assert min(residx) >= 0
         except AssertionError as e:
             print("Error on", pdb[i])
             raise e
 
 
 def compute_pair_xform_bins(dat, parallel=-1):
+    raise NotImplemented
+
     print(f"compute binnings for {len(dat['pairdata']['p_dist'])*2:,} pairs")
 
     pdb_res_offsets = dat["pdb_res_offsets"]
@@ -292,7 +295,7 @@ def main():
 
     dat = process_pdb_data(fnames, args.parallel)
 
-    dat = compute_pair_xform_bins(dat, args.parallel)
+    # dat = compute_pair_xform_bins(dat, args.parallel)
 
     #
     # with open("__HACK_TMP_FILE.pickle", "wb") as out:
@@ -307,8 +310,8 @@ def main():
 
     print(rp)
 
-    for t in rp.xbin_types:
-        print("xbin_swap_type", t, "->", rp.xbin_swap_type[t])
+    # for t in rp.xbin_types:
+    # print("xbin_swap_type", t, "->", rp.xbin_swap_type[t])
 
     with open(args.outfile, "wb") as out:
         _pickle.dump(rp, out)
