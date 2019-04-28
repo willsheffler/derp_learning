@@ -119,6 +119,7 @@ def pdbdata(pose, fname):
     # print(fname, "compute sasa")
     sasa_probe_vals = np.array([2, 3, 4])
     sasa, alapose = polya_sasa(pose, sasa_probe_vals)
+    sf(alapose)
     assert len(pose) == sasa.shape[0]
     assert sasa.shape[1] == len(sasa_probe_vals)
     for i, v in enumerate(sasa_probe_vals):
@@ -128,7 +129,8 @@ def pdbdata(pose, fname):
     chainseqs = [resdata["seq"][lb:ub] for lb, ub in chains]
     sym_chain_follows = [chainseqs.index(x) for x in chainseqs]
 
-    pairdata = extract_pair_terms(**vars())
+    pairdata = extract_pair_terms(min_ssep=10, **vars())
+    # print("npairs", len(pairdata["p_dist"]))
 
     return dict(
         fname=fname,
@@ -173,7 +175,7 @@ def extract_hbond_terms(pose, fname, **kw):
     return {k: v for k, v in zip(labels, result)}
 
 
-def extract_pair_terms(pose, alapose, sym_chain_follows, chains, fname, **kw):
+def extract_pair_terms(pose, alapose, sym_chain_follows, chains, fname, min_ssep, **kw):
     eweights = pose.energies().weights()
     energy_graph = pose.energies().energy_graph()
     energy_graph_ala = alapose.energies().energy_graph()
@@ -193,12 +195,15 @@ def extract_pair_terms(pose, alapose, sym_chain_follows, chains, fname, **kw):
             assert pose.residue(ir + 1).is_protein()
             for jr in range(ir + 1, len(pose)):
                 assert ir < jr
+                if jr - ir < min_ssep:
+                    continue
                 edge = energy_graph.find_edge(ir + 1, jr + 1)
                 alaedge = energy_graph_ala.find_edge(ir + 1, jr + 1)
                 if not edge:
                     continue
                 etot = edge.dot(eweights)
-                etot -= alaedge.dot(eweights) if alaedge else 0
+                alatot = alaedge.dot(eweights) if alaedge else 0
+                etot -= alatot
                 if etot >= 0:
                     continue
                 pairterms["p_resi"].append(ir)
@@ -233,14 +238,6 @@ def polya_sasa(pose, sasa_probe_vals):
         sasacalc.set_probe_radius(r)
         sasacalc.calculate(polya_pose)
         rsdsasa[:, i] = np.array(sasacalc.get_residue_sasa())
-        # print(
-        # i,
-        # r,
-        # len(rsdsasa),
-        # np.min(rsdsasa),
-        # np.max(rsdsasa),
-        # np.sum(rsdsasa[:, i] == 0),
-        # )
 
     return rsdsasa, polya_pose
 
