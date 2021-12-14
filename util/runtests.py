@@ -7,14 +7,21 @@ this script exists for easy editor integration
 import sys
 import willutil
 
-_overrides = {
+overrides = {
    #   "PYTHONPATH=. python rpxdock/app/genrate_motif_scores.py TEST"
 }
 
-_file_mappings = {
-   # 'sym.py': ['willutil/tests/test_homog.py'],
+file_mappings = {
+   'derp_learning/aimnet/aimnet/models.py': ['derp_learning/tests/test_aimnet.py'],
+   'derp_learning/aimnet/aimnet/modules.py': ['derp_learning/tests/test_aimnet.py'],
+   'derp_learning/aimnet/aimnet/loaders.py': ['derp_learning/tests/test_aimnet.py'],
+   'derp_learning/aimnet/aimnet/calculator.py': ['derp_learning/tests/test_aimnet.py'],
 }
 
 if __name__ == '__main__':
    args = willutil.runtests.get_args(sys.argv)
-   willutil.runtests.main(_file_mappings, _overrides, **args)
+   willutil.runtests.main(
+      file_mappings=file_mappings,
+      overrides=overrides,
+      **args,
+   )

@@ -2,19 +2,28 @@ name: derp_learning
 channels:
  - conda-forge
  # - https://pose:foldtree@conda.graylab.jhu.edu
+ - pytorch
+ # - bioconda
 dependencies:
  - python<3.10
  # - pyrosetta
+ - pytorch
+ - torchvision
+ - torchaudio 
+ - cudatoolkit=11.3 
+ - ase
  - numpy
  - scipy
  - rdkit
  - numba
+ - pyyaml
  - yapf
  - xarray
  - pytest
  - tqdm
  - pytest-sugar
  - pytest-xdist
+ - openbabel
  - pip
  - pip:
    - git+git://github.com/willsheffler/willutil.git@master
