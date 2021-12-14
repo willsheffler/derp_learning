@@ -160,7 +160,7 @@ def test_rdkit_bonds(printme=False):
 
    assert vals == valsh
 
-Chem.GetSymmSSSR(m)
+# Chem.GetSymmSSSR(m)
 
 if __name__ == '__main__':
    test_read_from_pdb()

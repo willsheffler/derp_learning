@@ -33,7 +33,7 @@ def test_aimnet_charges():
    # tests.save_test_data('test_aimnet_charges_mol', atoms)
    atoms = tests.load_test_data('test_aimnet_charges_mol')
    atoms.set_calculator(calc)
-   opt = ase.optimize.BFGS(atoms, trajectory='gas_opt.traj')
+   opt = ase.optimize.BFGS(atoms)
    opt.run(0.1)
 
    charge = calc.results['elmoments'][0, :, 0]
